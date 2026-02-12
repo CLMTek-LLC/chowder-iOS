@@ -8,7 +8,11 @@ Chowder is a native iOS chat client that connects to an [OpenClaw](https://docs.
 - **Persistent chat history** stored locally (survives app kill/relaunch)
 - **Agent identity sync** -- dynamically mirrors the bot's IDENTITY.md (name, creature, vibe, emoji) and USER.md (what the bot knows about you) from the OpenClaw workspace
 - **"Thinking..." shimmer** -- shows an animated status line while the agent is working, with a minimum display duration so it doesn't flash on fast responses
-- **Verbose tool activity** -- automatically enables `/verbose on` so tool calls (read, write, bash, etc.) update the shimmer with real-time labels like "Reading IDENTITY.md..."
+- **Real-time activity tracking** -- polls `chat.history` during agent runs to show intelligent progress updates:
+  - Displays thinking steps with markdown stripped (e.g., "Appending weather summary to file...")
+  - Shows tool intents derived from commands (e.g., "Updating weather.txt..." instead of generic "Running a command...")
+  - Displays completion timing (e.g., "Updated weather.txt (13ms)")
+  - Parses assistant message `content` arrays to extract thinking and toolCall items
 - **Activity detail card** -- tap the shimmer to see the full list of thinking steps and tool calls the agent performed
 - **Custom agent avatar** -- pick a profile photo for the agent from your photo library
 - **Settings sync** -- edit the bot's identity or your user profile in Settings and the changes are written back to the OpenClaw workspace files
@@ -45,11 +49,15 @@ iPhone (Chowder)                Mac mini (Gateway)
       |                               |
       |  chat.send (user message)     |  --> Pi agent (RPC)
       |------------------------------>|
-      |  chat.delta (tool summaries)  |  --> shimmer: "Reading IDENTITY.md..."
+      |  agent/lifecycle (phase:start)|  --> start polling chat.history
+      |<------------------------------|
+      |  chat.history polling (500ms) |  --> extract thinking + toolCall from content[]
+      |------------------------------>|
+      |  assistant content arrays     |  --> "Appending to weather.txt...", "Updated weather.txt (13ms)"
       |<------------------------------|
       |  agent/assistant (text deltas)|  --> streamed into chat bubble
       |<------------------------------|
-      |  agent/lifecycle (end)        |  --> message complete
+      |  agent/lifecycle (phase:end)  |  --> stop polling, message complete
       |<------------------------------|
       |  chat.final (full response)   |
       |<------------------------------|
@@ -168,9 +176,18 @@ Chowder will connect to the gateway, complete the WebSocket handshake, and show 
 
 Chowder dynamically mirrors the bot's workspace files -- it never hardcodes identity values. On connect, it asks the bot to read `IDENTITY.md` and `USER.md` and return their contents in a delimiter-based format. The response is parsed into structured Swift models (`BotIdentity`, `UserProfile`) and cached locally via `LocalStorage`. When the user edits these in Settings, the changes are written back to the workspace via a chat-driven write request.
 
-### Verbose Tool Activity
+### Real-Time Activity Tracking
 
-With `/verbose on`, the gateway sends tool call summaries as separate `chat.delta` events (e.g., "📄 read: IDENTITY.md"). Chowder detects these by pattern-matching known tool names and routes them to the shimmer display instead of the chat. This gives users real-time visibility into what the agent is doing.
+Chowder polls `chat.history` every 500ms while the agent is running (from `lifecycle:start` to `lifecycle:end`). Each history poll extracts activity from assistant message `content` arrays:
+
+- **Thinking items** (`type: "thinking"`): Extracts the thinking text, strips markdown formatting (`**`), and displays as one-line progress (e.g., "Appending weather summary to file...")
+- **Tool calls** (`type: "toolCall"`): Derives user-friendly intents from tool arguments:
+  - Detects file operations via command parsing (e.g., `cat >> weather.txt` → "Appending to weather.txt...")
+  - Shows specific filenames instead of generic labels
+  - Stores metadata for completion messages
+- **Tool results** (`role: "toolResult"`): Shows completion with timing (e.g., "Updated weather.txt (13ms)")
+
+Deduplication prevents repeated items using `thinkingSignature.id`, `toolCallId`, and content hashing. A request-in-flight flag prevents concurrent polling.
 
 ### Sending Messages
 

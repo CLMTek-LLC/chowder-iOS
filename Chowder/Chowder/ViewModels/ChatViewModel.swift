@@ -6,6 +6,30 @@ final class ChatViewModel: ChatServiceDelegate {
 
     var messages: [Message] = []
     var inputText: String = ""
+
+    // MARK: - Pagination
+
+    /// Number of messages shown from the end of the history.
+    var displayLimit: Int = 50
+    private let pageSize: Int = 50
+
+    /// The slice of messages currently rendered in the chat view.
+    var displayedMessages: [Message] {
+        if messages.count <= displayLimit {
+            return messages
+        }
+        return Array(messages.suffix(displayLimit))
+    }
+
+    /// Whether there are older messages beyond what's currently displayed.
+    var hasEarlierMessages: Bool {
+        messages.count > displayLimit
+    }
+
+    /// Load the next page of earlier messages.
+    func loadEarlierMessages() {
+        displayLimit += pageSize
+    }
     var isLoading: Bool = false
     var isConnected: Bool = false
     var showSettings: Bool = false
@@ -32,8 +56,6 @@ final class ChatViewModel: ChatServiceDelegate {
     /// Controls presentation of the activity detail card.
     var showActivityCard: Bool = false
 
-    /// Minimum time (seconds) the shimmer should remain visible so it doesn't flash.
-    private let shimmerMinDuration: TimeInterval = 0.8
     private var shimmerStartTime: Date?
 
     /// Light haptic fired once when the assistant's response starts streaming.
@@ -42,12 +64,26 @@ final class ChatViewModel: ChatServiceDelegate {
 
     private var chatService: ChatService?
 
-    /// Tracks whether an invisible sync request is in flight on the main session.
-    private enum SyncState { case none, reading, writing }
-    private var syncState: SyncState = .none
-
     var isConfigured: Bool {
         ConnectionConfig().isConfigured
+    }
+    
+    // MARK: - History Parsing State
+    
+    /// Tracks seen thinking items by their thinkingSignature.id to prevent duplicates
+    private var seenThinkingIds: Set<String> = []
+    
+    /// Tracks seen tool calls by their id to prevent duplicates
+    private var seenToolCallIds: Set<String> = []
+    
+    /// Metadata for tool calls, keyed by toolCallId, used to show completion info
+    private var toolCallMetadata: [String: ToolCallMeta] = [:]
+    
+    /// Metadata stored for each tool call to derive completion labels
+    struct ToolCallMeta {
+        let toolName: String
+        let arguments: [String: Any]
+        let derivedIntent: String
     }
 
     // MARK: - Buffered Debug Logging
@@ -141,6 +177,11 @@ final class ChatViewModel: ChatServiceDelegate {
         currentActivity = AgentActivity()
         currentActivity?.currentLabel = "Thinking..."
         shimmerStartTime = Date()
+        
+        // Clear history parsing state for new run
+        seenThinkingIds.removeAll()
+        seenToolCallIds.removeAll()
+        toolCallMetadata.removeAll()
         log("shimmer started — label=\"Thinking...\"")
 
         messages.append(Message(role: .assistant, content: ""))
@@ -162,20 +203,10 @@ final class ChatViewModel: ChatServiceDelegate {
     func chatServiceDidConnect() {
         log("CONNECTED")
         isConnected = true
-        enableVerboseMode()
-    }
-
-    /// Send `/verbose on` to enable tool call summaries in the chat stream,
-    /// then chain into the workspace sync.
-    private func enableVerboseMode() {
-        guard chatService != nil, syncState == .none else {
-            requestWorkspaceSync()
-            return
-        }
-        syncState = .writing  // suppress the confirmation message from appearing
-        pendingWorkspaceSync = true
-        chatService?.send(text: "/verbose on")
-        log("[SYNC] Sent /verbose on")
+        
+        // Workspace sync disabled - identity/profile are updated via tool events
+        // when the agent writes to IDENTITY.md or USER.md
+        log("Using cached identity: \(botIdentity.name)")
     }
 
     func chatServiceDidDisconnect() {
@@ -184,9 +215,6 @@ final class ChatViewModel: ChatServiceDelegate {
     }
 
     func chatServiceDidReceiveDelta(_ text: String) {
-        // Suppress deltas during invisible sync requests
-        if syncState != .none { return }
-
         guard let lastIndex = messages.indices.last,
               messages[lastIndex].role == .assistant else { return }
         messages[lastIndex].content += text
@@ -195,37 +223,20 @@ final class ChatViewModel: ChatServiceDelegate {
         if !hasPlayedResponseHaptic {
             hasPlayedResponseHaptic = true
             responseHaptic.impactOccurred()
+            log("💬 Assistant responding")
         }
 
-        // Hide the shimmer once text starts streaming — but respect minimum display time
-        if currentActivity != nil, !(currentActivity?.currentLabel.isEmpty ?? true) {
-            let elapsed = Date().timeIntervalSince(shimmerStartTime ?? .distantPast)
-            if elapsed >= shimmerMinDuration {
-                log("shimmer cleared — first delta received (after \(String(format: "%.2f", elapsed))s)")
-                currentActivity?.currentLabel = ""
-            } else {
-                // Schedule clearing after the remaining minimum time
-                let remaining = shimmerMinDuration - elapsed
-                log("shimmer deferred — will clear in \(String(format: "%.2f", remaining))s")
-                DispatchQueue.main.asyncAfter(deadline: .now() + remaining) { [weak self] in
-                    guard let self, self.currentActivity != nil else { return }
-                    self.log("shimmer cleared — min duration reached")
-                    self.currentActivity?.currentLabel = ""
-                }
-            }
-        }
+        // Don't hide the shimmer here — for long agentic tasks the agent alternates
+        // between emitting text and using tools. The shimmer and inline steps stay
+        // visible until the turn finishes (chatServiceDidFinishMessage).
     }
 
     func chatServiceDidFinishMessage() {
-        // During sync, the lifecycle end fires before chat.final delivers the response.
-        // Just log and let chatServiceDidReceiveFinalContent handle the rest.
-        if syncState != .none {
-            log("message.done (sync — suppressed)")
-            return
-        }
-
         log("message.done")
         isLoading = false
+
+        // Mark all remaining in-progress steps as completed
+        currentActivity?.finishCurrentSteps()
 
         // Preserve the activity for the detail card, then clear the shimmer
         if let activity = currentActivity {
@@ -254,68 +265,128 @@ final class ChatViewModel: ChatServiceDelegate {
     }
 
     func chatServiceDidReceiveThinkingDelta(_ text: String) {
-        if currentActivity == nil { currentActivity = AgentActivity() }
+        log("🧠 Thinking delta: \(text.count) chars")
+        
+        if currentActivity == nil {
+            log("Creating new currentActivity for thinking")
+            currentActivity = AgentActivity()
+        }
         currentActivity?.thinkingText += text
         currentActivity?.currentLabel = "Thinking..."
 
-        // Add or update the thinking step
-        if let lastStep = currentActivity?.steps.last, lastStep.type == .thinking {
+        // Add or update the thinking step — if the last step is already a thinking
+        // step, append to it; otherwise mark previous steps complete and start a new one.
+        if let lastStep = currentActivity?.steps.last, lastStep.type == .thinking, lastStep.status == .inProgress {
             currentActivity?.steps[currentActivity!.steps.count - 1].detail += text
         } else {
+            currentActivity?.finishCurrentSteps()
             currentActivity?.steps.append(
                 ActivityStep(type: .thinking, label: "Thinking", detail: text)
             )
         }
     }
 
-    func chatServiceDidReceiveToolEvent(name: String, path: String?) {
-        if currentActivity == nil { currentActivity = AgentActivity() }
-
-        // Build a human-readable label
-        let label: String
-        if let path {
-            let fileName = (path as NSString).lastPathComponent
-            switch name {
-            case "write":  label = "Writing \(fileName)..."
-            case "read":   label = "Reading \(fileName)..."
-            case "search": label = "Searching..."
-            case "bash":   label = "Running command..."
-            default:       label = "\(name) \(fileName)..."
-            }
-        } else {
-            switch name {
-            case "bash":   label = "Running command..."
-            case "search": label = "Searching..."
-            default:       label = "Using \(name)..."
-            }
+    func chatServiceDidReceiveToolEvent(name: String, path: String?, args: [String: Any]?) {
+        log("🔧 Tool event received: \(name) path: \(path ?? "nil")")
+        
+        if currentActivity == nil {
+            log("Creating new currentActivity for tool event")
+            currentActivity = AgentActivity()
         }
 
+        // Mark all previous in-progress steps as completed before adding the new one
+        currentActivity?.finishCurrentSteps()
+
+        // Build a human-readable label from the tool name + args
+        let label = Self.friendlyLabel(for: name, path: path, args: args)
+        let detail = Self.detailString(for: name, path: path, args: args)
+
+        log("Setting shimmer label: '\(label)'")
         currentActivity?.currentLabel = label
         currentActivity?.steps.append(
-            ActivityStep(type: .toolCall, label: label, detail: path ?? "")
+            ActivityStep(type: .toolCall, label: label, detail: detail)
         )
+        log("Activity now has \(currentActivity?.steps.count ?? 0) total steps (\(currentActivity?.completedSteps.count ?? 0) completed)")
     }
 
-    /// Tracks whether we still need to run the workspace sync after /verbose on completes.
-    private var pendingWorkspaceSync = false
+    // MARK: - Friendly Tool Labels
 
-    func chatServiceDidReceiveFinalContent(_ text: String) {
-        switch syncState {
-        case .reading:
-            log("[SYNC] Final content received (\(text.count) chars)")
-            syncState = .none
-            handleSyncResponse(text)
-        case .writing:
-            log("[SYNC] Write/directive complete: \(String(text.prefix(80)))")
-            syncState = .none
-            // If this was the /verbose on confirmation, chain into workspace sync
-            if pendingWorkspaceSync {
-                pendingWorkspaceSync = false
-                requestWorkspaceSync()
+    /// Map a raw tool name + args into a short, human-readable status line.
+    private static func friendlyLabel(for name: String, path: String?, args: [String: Any]?) -> String {
+        let fileName = path.map { ($0 as NSString).lastPathComponent }
+
+        switch name {
+        // File tools
+        case "write", "apply_patch":
+            return "Writing \(fileName ?? "file")..."
+        case "read":
+            return "Reading \(fileName ?? "file")..."
+        case "edit":
+            return "Editing \(fileName ?? "file")..."
+        case "search":
+            if let query = args?["query"] as? String, !query.isEmpty {
+                let short = query.count > 30 ? String(query.prefix(30)) + "..." : query
+                return "Searching for \"\(short)\"..."
             }
-        case .none:
-            break // Normal chat — no-op (we use agent stream deltas)
+            return "Searching files..."
+
+        // Shell / exec
+        case "bash", "exec":
+            if let cmd = args?["command"] as? String, !cmd.isEmpty {
+                let short = cmd.count > 30 ? String(cmd.prefix(30)) + "..." : cmd
+                return "Running: \(short)"
+            }
+            return "Running a command..."
+
+        // Browser / web
+        case "browser", "browser.search", "web", "web.search":
+            if let query = args?["query"] as? String, !query.isEmpty {
+                let short = query.count > 30 ? String(query.prefix(30)) + "..." : query
+                return "Searching the web for \"\(short)\"..."
+            }
+            if let url = args?["url"] as? String, !url.isEmpty {
+                return "Browsing the web..."
+            }
+            return "Searching the web..."
+        case "browser.click":
+            return "Navigating a webpage..."
+        case "browser.fill":
+            return "Filling out a form..."
+        case "browser.navigate":
+            return "Opening a webpage..."
+
+        // Agent / task tools
+        case "llm_task":
+            return "Running a sub-task..."
+        case "agent_send":
+            return "Coordinating with another agent..."
+        case "message":
+            return "Sending a message..."
+
+        // Session tools
+        case "sessions_list", "sessions_read":
+            return "Checking sessions..."
+
+        // Canvas
+        case "canvas":
+            return "Working on canvas..."
+
+        // Fallback
+        default:
+            if let fileName {
+                return "\(name) \(fileName)..."
+            }
+            return "Using \(name)..."
         }
+    }
+
+    /// Build a detail string for the activity card (path, URL, or command).
+    private static func detailString(for name: String, path: String?, args: [String: Any]?) -> String {
+        if let path, !path.isEmpty { return path }
+        if let url = args?["url"] as? String, !url.isEmpty { return url }
+        if let query = args?["query"] as? String, !query.isEmpty { return query }
+        if let cmd = args?["command"] as? String, !cmd.isEmpty { return cmd }
+        return ""
     }
 
     func chatServiceDidUpdateBotIdentity(_ identity: BotIdentity) {
@@ -330,108 +401,285 @@ final class ChatViewModel: ChatServiceDelegate {
         LocalStorage.saveUserProfile(profile)
     }
 
-    // MARK: - Workspace Sync (invisible requests on the main session)
-
-    /// Ask the bot to read IDENTITY.md and USER.md on the main session.
-    /// The request and response are invisible to the user (suppressed from the chat UI).
-    func requestWorkspaceSync() {
-        guard chatService != nil, syncState == .none else { return }
-
-        syncState = .reading
-        let prompt = """
-        Read the files IDENTITY.md and USER.md from your workspace. \
-        Return their raw contents in this exact format — no other commentary, no markdown fences:
-
-        ---IDENTITY---
-        [paste raw IDENTITY.md contents here]
-        ---USER---
-        [paste raw USER.md contents here]
-        ---END---
-        """
-        chatService?.send(text: prompt)
-        log("[SYNC] Sent read request on main session")
+    func chatServiceDidReceiveHistoryMessages(_ messages: [[String: Any]]) {
+        log("Processing \(messages.count) new history items")
+        
+        // Ensure we have an activity tracker
+        if currentActivity == nil {
+            currentActivity = AgentActivity()
+        }
+        
+        for item in messages {
+            processHistoryItem(item)
+        }
     }
 
-    /// Send a workspace update on the main session (used by Settings save).
+    /// Parse a single history item and update activity
+    private func processHistoryItem(_ item: [String: Any]) {
+        guard let role = item["role"] as? String else {
+            log("⚠️ History item missing 'role' field, keys: \(Array(item.keys))")
+            return
+        }
+        
+        log("📋 Processing history item: role=\(role)")
+        
+        switch role {
+        case "assistant":
+            // Assistant messages contain content arrays with thinking and toolCall items
+            if let contentArray = item["content"] as? [[String: Any]] {
+                log("📝 Assistant message with \(contentArray.count) content items")
+                for contentItem in contentArray {
+                    processAssistantContentItem(contentItem)
+                }
+            }
+            
+        case "toolResult":
+            // Tool completion - look up metadata and show completion line
+            processToolResultItem(item)
+            
+        case "user":
+            // User messages - we already have these in our local message list
+            // Skip silently
+            break
+            
+        default:
+            log("⚠️ History: unknown role '\(role)' - item keys: \(Array(item.keys))")
+            break
+        }
+    }
+    
+    /// Process individual content items from assistant messages (thinking, toolCall)
+    private func processAssistantContentItem(_ contentItem: [String: Any]) {
+        guard let type = contentItem["type"] as? String else {
+            return
+        }
+        
+        switch type {
+        case "thinking":
+            processThinkingContent(contentItem)
+            
+        case "toolCall":
+            processToolCallContent(contentItem)
+            
+        default:
+            // text, image, etc - ignore for activity tracking
+            break
+        }
+    }
+    
+    /// Process thinking content items
+    private func processThinkingContent(_ contentItem: [String: Any]) {
+        guard let thinking = contentItem["thinking"] as? String else {
+            return
+        }
+        
+        // Strip markdown ** and trim
+        let cleanText = thinking
+            .replacingOccurrences(of: "**", with: "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        
+        guard !cleanText.isEmpty else { return }
+        
+        // Dedupe by thinkingSignature.id if available, else use hash
+        var thinkingId: String?
+        if let sigString = contentItem["thinkingSignature"] as? String,
+           let sigData = sigString.data(using: .utf8),
+           let sig = try? JSONSerialization.jsonObject(with: sigData) as? [String: Any],
+           let id = sig["id"] as? String {
+            thinkingId = id
+        } else if let sig = contentItem["thinkingSignature"] as? [String: Any],
+                  let id = sig["id"] as? String {
+            thinkingId = id
+        } else {
+            thinkingId = String(cleanText.hashValue)
+        }
+        
+        if let id = thinkingId, !seenThinkingIds.contains(id) {
+            seenThinkingIds.insert(id)
+            log("💭 Thinking: \(cleanText)")
+            
+            // Show as one-line progress
+            currentActivity?.currentLabel = cleanText + "..."
+            currentActivity?.steps.append(
+                ActivityStep(type: .thinking, label: cleanText, detail: "")
+            )
+        }
+    }
+    
+    /// Process toolCall content items
+    private func processToolCallContent(_ contentItem: [String: Any]) {
+        guard let toolCallId = contentItem["id"] as? String,
+              let toolName = contentItem["name"] as? String else {
+            return
+        }
+        
+        // Skip if already seen
+        guard !seenToolCallIds.contains(toolCallId) else {
+            return
+        }
+        seenToolCallIds.insert(toolCallId)
+        
+        let arguments = contentItem["arguments"] as? [String: Any] ?? [:]
+        
+        // Derive intent from tool call
+        let intent = deriveIntentFromToolCall(name: toolName, arguments: arguments)
+        
+        // Store metadata for later use when toolResult arrives
+        toolCallMetadata[toolCallId] = ToolCallMeta(
+            toolName: toolName,
+            arguments: arguments,
+            derivedIntent: intent
+        )
+        
+        log("🔧 Tool call: \(intent)")
+        
+        // Show intent as progress
+        currentActivity?.finishCurrentSteps()
+        currentActivity?.currentLabel = intent
+        currentActivity?.steps.append(
+            ActivityStep(type: .toolCall, label: intent, detail: "")
+        )
+    }
+    
+    /// Process toolResult items to show completion
+    private func processToolResultItem(_ item: [String: Any]) {
+        guard let toolCallId = item["toolCallId"] as? String else {
+            return
+        }
+        
+        // Skip if already processed
+        guard !seenToolCallIds.contains(toolCallId) else {
+            return
+        }
+        seenToolCallIds.insert(toolCallId)
+        
+        let details = item["details"] as? [String: Any]
+        let duration = details?["durationMs"] as? Int ?? 0
+        let exitCode = details?["exitCode"] as? Int ?? 0
+        let isError = item["isError"] as? Bool ?? false
+        let toolName = item["toolName"] as? String ?? "Tool"
+        
+        // Build completion label
+        let completionLabel: String
+        if isError || exitCode != 0 {
+            completionLabel = "Command failed"
+        } else if let meta = toolCallMetadata[toolCallId] {
+            // Use the intent we derived earlier
+            let baseIntent = meta.derivedIntent.replacingOccurrences(of: "...", with: "")
+            completionLabel = "\(baseIntent) (\(duration)ms)"
+        } else {
+            completionLabel = "\(toolName) completed (\(duration)ms)"
+        }
+        
+        log("✅ Tool result: \(completionLabel)")
+        
+        // Mark previous step as completed and add completion
+        currentActivity?.finishCurrentSteps()
+        currentActivity?.steps.append(
+            ActivityStep(type: .toolCall, label: completionLabel, detail: "", status: .completed)
+        )
+    }
+
+    /// Derive a user-friendly intent description from a tool call
+    private func deriveIntentFromToolCall(name: String, arguments: [String: Any]) -> String {
+        switch name {
+        case "exec", "bash":
+            if let command = arguments["command"] as? String {
+                // Check for file operations with output redirection
+                if let filename = extractFilenameFromRedirect(command) {
+                    if command.contains("cat ") && command.contains(">>") {
+                        return "Appending to \(filename)..."
+                    } else if command.contains(">>") {
+                        return "Updating \(filename)..."
+                    } else if command.contains(">") {
+                        return "Writing \(filename)..."
+                    }
+                }
+                
+                // Check for other common commands
+                if command.contains("curl") || command.contains("wget") {
+                    return "Fetching data..."
+                }
+                if command.contains("git") {
+                    return "Running git command..."
+                }
+                
+                // Generic fallback
+                return "Running a command..."
+            }
+            
+        case "read", "Read":
+            if let path = arguments["path"] as? String {
+                let filename = (path as NSString).lastPathComponent
+                return "Reading \(filename)..."
+            }
+            return "Reading file..."
+            
+        case "write", "Write":
+            if let path = arguments["path"] as? String {
+                let filename = (path as NSString).lastPathComponent
+                return "Writing \(filename)..."
+            }
+            return "Writing file..."
+            
+        case "browser", "web":
+            if let query = arguments["query"] as? String {
+                return "Searching for \(query)..."
+            }
+            if let url = arguments["url"] as? String {
+                return "Opening \(url)..."
+            }
+            return "Using browser..."
+            
+        default:
+            return "Using \(name)..."
+        }
+        
+        return "Using \(name)..."
+    }
+    
+    /// Extract filename from shell redirect (>> or >)
+    private func extractFilenameFromRedirect(_ command: String) -> String? {
+        let patterns = [#">>\s*([^\s\n]+)"#, #">\s*([^\s\n]+)"#]
+        for pattern in patterns {
+            if let regex = try? NSRegularExpression(pattern: pattern),
+               let match = regex.firstMatch(in: command, range: NSRange(command.startIndex..., in: command)),
+               let range = Range(match.range(at: 1), in: command) {
+                let filename = String(command[range])
+                // Return just the filename, not the full path
+                return (filename as NSString).lastPathComponent
+            }
+        }
+        return nil
+    }
+    
+    /// Extract content from history item (handles various formats)
+    private func extractContent(from item: [String: Any]) -> String? {
+        if let content = item["content"] as? String {
+            return content
+        }
+        if let text = item["text"] as? String {
+            return text
+        }
+        // Handle structured content blocks
+        if let blocks = item["content"] as? [[String: Any]] {
+            let texts = blocks.compactMap { block -> String? in
+                guard block["type"] as? String == "text" else { return nil }
+                return block["text"] as? String
+            }
+            return texts.joined()
+        }
+        return nil
+    }
+
+    // MARK: - Workspace Data Management
+
+    /// Save workspace data to local cache (used by Settings save).
     func saveWorkspaceData(identity: BotIdentity, profile: UserProfile) {
-        // Cache locally immediately
         self.botIdentity = identity
         self.userProfile = profile
         LocalStorage.saveBotIdentity(identity)
         LocalStorage.saveUserProfile(profile)
-
-        guard chatService != nil, syncState == .none else { return }
-
-        syncState = .writing
-        let identityMd = identity.toMarkdown()
-        let profileMd = profile.toMarkdown()
-        let prompt = """
-        Please update your workspace files with the following content:
-
-        1. Write this to IDENTITY.md:
-        ```
-        \(identityMd)
-        ```
-
-        2. Write this to USER.md:
-        ```
-        \(profileMd)
-        ```
-
-        Just write the files, no other commentary needed.
-        """
-        chatService?.send(text: prompt)
-        log("[SYNC] Sent write request on main session")
-    }
-
-    /// Parse the bot's sync response and update identity / profile caches.
-    private func handleSyncResponse(_ text: String) {
-        log("Sync response received (\(text.count) chars)")
-        log("Sync response preview: \(String(text.prefix(300)))")
-
-        // Strategy 1: Try delimiter-based format (---IDENTITY--- / ---USER--- / ---END---)
-        if let identityRange = text.range(of: "---IDENTITY---"),
-           let userRange = text.range(of: "---USER---") {
-            let identityMd = String(text[identityRange.upperBound..<userRange.lowerBound])
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-            let userEndIndex = text.range(of: "---END---")?.lowerBound ?? text.endIndex
-            let userMd = String(text[userRange.upperBound..<userEndIndex])
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-
-            if !identityMd.isEmpty {
-                self.botIdentity = BotIdentity.from(markdown: identityMd)
-                LocalStorage.saveBotIdentity(self.botIdentity)
-                log("Synced IDENTITY.md via delimiters — name=\(self.botIdentity.name)")
-            }
-            if !userMd.isEmpty {
-                self.userProfile = UserProfile.from(markdown: userMd)
-                LocalStorage.saveUserProfile(self.userProfile)
-                log("Synced USER.md via delimiters — name=\(self.userProfile.name)")
-            }
-            return
-        }
-
-        // Strategy 2: Try JSON format (legacy / fallback)
-        let cleaned = text
-            .replacingOccurrences(of: "```json", with: "")
-            .replacingOccurrences(of: "```", with: "")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-
-        if let data = cleaned.data(using: .utf8),
-           let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
-            if let identityMd = json["identity"] as? String {
-                self.botIdentity = BotIdentity.from(markdown: identityMd)
-                LocalStorage.saveBotIdentity(self.botIdentity)
-                log("Synced IDENTITY.md via JSON — name=\(self.botIdentity.name)")
-            }
-            if let userMd = json["user"] as? String {
-                self.userProfile = UserProfile.from(markdown: userMd)
-                LocalStorage.saveUserProfile(self.userProfile)
-                log("Synced USER.md via JSON — name=\(self.userProfile.name)")
-            }
-            return
-        }
-
-        log("Sync response could not be parsed (neither delimiters nor JSON found)")
+        log("Settings saved to local cache")
     }
 }

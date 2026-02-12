@@ -3,6 +3,8 @@ import SwiftUI
 struct ChatView: View {
     @State private var viewModel = ChatViewModel()
     @State private var isAtBottom = true
+    @FocusState private var isInputFocused: Bool
+
     var body: some View {
         VStack(spacing: 0) {
             // Messages
@@ -12,9 +14,37 @@ struct ChatView: View {
                     Color.clear.frame(height: 72)
 
                     LazyVStack(alignment: .leading, spacing: 16) {
-                        ForEach(viewModel.messages) { message in
+                        // "Load earlier messages" button
+                        if viewModel.hasEarlierMessages {
+                            Button {
+                                viewModel.loadEarlierMessages()
+                            } label: {
+                                Text("Load earlier messages")
+                                    .font(.system(size: 14, weight: .medium))
+                                    .foregroundStyle(.secondary)
+                                    .frame(maxWidth: .infinity)
+                                    .padding(.vertical, 8)
+                            }
+                        }
+
+                        ForEach(viewModel.displayedMessages) { message in
                             MessageBubbleView(message: message)
                                 .id(message.id)
+                        }
+
+                        // Inline completed steps — rendered as lightweight rows
+                        // so users can see what the agent has done so far.
+                        if let activity = viewModel.currentActivity,
+                           !activity.completedSteps.isEmpty {
+                            ForEach(activity.completedSteps) { step in
+                                ActivityStepRow(step: step) {
+                                    viewModel.showActivityCard = true
+                                }
+                                .transition(.opacity.combined(with: .move(edge: .top)))
+                                .onAppear {
+                                    print("🎨 Completed step appeared: '\(step.label)'")
+                                }
+                            }
                         }
 
                         // Thinking shimmer — shown while the agent is working
@@ -25,6 +55,9 @@ struct ChatView: View {
                             }
                             .id("shimmer")
                             .transition(.opacity)
+                            .onAppear {
+                                print("🎨 Shimmer appeared with label: '\(activity.currentLabel)'")
+                            }
                         }
 
                         // Invisible anchor — must be inside LazyVStack so
@@ -59,34 +92,14 @@ struct ChatView: View {
                         .transition(.scale(scale: 0.5).combined(with: .opacity))
                     }
                 }
-                .onChange(of: viewModel.messages.count) {
-                    // New message added (user sent or assistant placeholder) — always scroll to bottom
-                    withAnimation {
-                        proxy.scrollTo("bottom", anchor: .bottom)
-                    }
-                }
-                .onChange(of: viewModel.messages.last?.content) {
-                    // Streaming delta — only auto-scroll if already at bottom
-                    guard isAtBottom else { return }
-                    withAnimation {
-                        proxy.scrollTo("bottom", anchor: .bottom)
-                    }
-                }
-                .onChange(of: viewModel.currentActivity?.currentLabel) {
-                    // Shimmer appeared/updated — only auto-scroll if already at bottom
-                    guard isAtBottom else { return }
-                    if viewModel.currentActivity != nil {
-                        withAnimation {
-                            proxy.scrollTo("bottom", anchor: .bottom)
-                        }
-                    }
-                }
+                // -- Auto-scroll handlers removed; add back as needed --
                 .scrollDismissesKeyboard(.interactively)
             }
 
             // Input bar
             HStack(spacing: 12) {
                 TextField("Message...", text: $viewModel.inputText, axis: .vertical)
+                    .focused($isInputFocused)
                     .lineLimit(1...5)
                     .padding(.horizontal, 16)
                     .padding(.vertical, 10)
@@ -94,6 +107,7 @@ struct ChatView: View {
                     .clipShape(RoundedRectangle(cornerRadius: 20))
 
                 Button {
+                    isInputFocused = false
                     viewModel.send()
                 } label: {
                     Image(systemName: "arrow.up.circle.fill")
