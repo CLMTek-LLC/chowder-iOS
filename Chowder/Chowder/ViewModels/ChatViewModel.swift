@@ -70,6 +70,10 @@ final class ChatViewModel: ChatServiceDelegate {
     
     // MARK: - History Parsing State
     
+    /// Generation counter incremented each time a new message is sent
+    /// Used to discard stale history responses from previous runs
+    private var currentRunGeneration: Int = 0
+    
     /// Tracks seen thinking items by their thinkingSignature.id to prevent duplicates
     private var seenThinkingIds: Set<String> = []
     
@@ -178,6 +182,10 @@ final class ChatViewModel: ChatServiceDelegate {
         currentActivity?.currentLabel = "Thinking..."
         shimmerStartTime = Date()
         
+        // Increment generation counter to discard stale history responses
+        currentRunGeneration += 1
+        log("Starting new run generation \(currentRunGeneration)")
+        
         // Clear history parsing state for new run
         seenThinkingIds.removeAll()
         seenToolCallIds.removeAll()
@@ -242,8 +250,11 @@ final class ChatViewModel: ChatServiceDelegate {
         if let activity = currentActivity {
             lastCompletedActivity = activity
         }
+        
+        // Clear current activity to prevent late history items from appearing
         currentActivity = nil
         shimmerStartTime = nil
+        log("Cleared currentActivity for generation \(currentRunGeneration)")
 
         LocalStorage.saveMessages(messages)
     }
@@ -402,11 +413,12 @@ final class ChatViewModel: ChatServiceDelegate {
     }
 
     func chatServiceDidReceiveHistoryMessages(_ messages: [[String: Any]]) {
-        log("Processing \(messages.count) new history items")
+        log("Processing \(messages.count) new history items for generation \(currentRunGeneration)")
         
-        // Ensure we have an activity tracker
-        if currentActivity == nil {
-            currentActivity = AgentActivity()
+        // Discard late-arriving history from previous runs
+        guard currentActivity != nil else {
+            log("⚠️ No current activity - discarding stale history from previous run")
+            return
         }
         
         for item in messages {
