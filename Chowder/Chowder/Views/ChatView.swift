@@ -13,7 +13,7 @@ struct ChatView: View {
                     // Spacer to push content below header
                     Color.clear.frame(height: 72)
 
-                    LazyVStack(alignment: .leading, spacing: 16) {
+                    LazyVStack(alignment: .leading, spacing: 4) {
                         // "Load earlier messages" button
                         if viewModel.hasEarlierMessages {
                             Button {
@@ -118,7 +118,7 @@ struct ChatView: View {
                         .font(.system(size: 32))
                         .foregroundStyle(
                             viewModel.isLoading
-                                ? Color.red
+                                ? Color.black
                                 : (viewModel.inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                                     ? Color(.systemGray4)
                                     : Color.blue)

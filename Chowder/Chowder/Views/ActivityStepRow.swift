@@ -25,7 +25,7 @@ struct ActivityStepRow: View {
                 .font(.system(size: 11, weight: .regular, design: .monospaced))
                 .foregroundStyle(Color(.tertiaryLabel))
         }
-        .padding(.vertical, 2)
+        .padding(.vertical, 1)
         .padding(.horizontal, 8)
         .contentShape(Rectangle())
         .onTapGesture { onTap() }
