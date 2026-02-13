@@ -35,7 +35,7 @@ struct ChatView: View {
                         // Inline completed steps — wrapped in VStack with tight spacing
                         if let activity = viewModel.currentActivity,
                            !activity.completedSteps.isEmpty {
-                            VStack(spacing: 0) {
+                            VStack(spacing: 4) {
                                 ForEach(activity.completedSteps) { step in
                                     ActivityStepRow(step: step) {
                                         viewModel.showActivityCard = true
@@ -108,14 +108,13 @@ struct ChatView: View {
                     .clipShape(RoundedRectangle(cornerRadius: 20))
 
                 Button {
+                    // Dismiss keyboard first, before any other operations
+                    isInputFocused = false
+                    
                     if viewModel.isLoading {
                         viewModel.stopGeneration()
                     } else {
                         viewModel.send()
-                    }
-                    // Dismiss keyboard with animation
-                    withAnimation {
-                        isInputFocused = false
                     }
                 } label: {
                     Image(systemName: viewModel.isLoading ? "stop.circle.fill" : "arrow.up.circle.fill")
