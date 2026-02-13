@@ -107,11 +107,14 @@ struct ChatView: View {
                     .clipShape(RoundedRectangle(cornerRadius: 20))
 
                 Button {
-                    isInputFocused = false
                     if viewModel.isLoading {
                         viewModel.stopGeneration()
                     } else {
                         viewModel.send()
+                    }
+                    // Dismiss keyboard with animation
+                    withAnimation {
+                        isInputFocused = false
                     }
                 } label: {
                     Image(systemName: viewModel.isLoading ? "stop.circle.fill" : "arrow.up.circle.fill")
