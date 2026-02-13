@@ -13,7 +13,7 @@ struct ChatView: View {
                     // Spacer to push content below header
                     Color.clear.frame(height: 72)
 
-                    LazyVStack(alignment: .leading, spacing: 4) {
+                    LazyVStack(alignment: .leading, spacing: 16) {
                         // "Load earlier messages" button
                         if viewModel.hasEarlierMessages {
                             Button {
@@ -32,17 +32,18 @@ struct ChatView: View {
                                 .id(message.id)
                         }
 
-                        // Inline completed steps — rendered as lightweight rows
-                        // so users can see what the agent has done so far.
+                        // Inline completed steps — wrapped in VStack with tight spacing
                         if let activity = viewModel.currentActivity,
                            !activity.completedSteps.isEmpty {
-                            ForEach(activity.completedSteps) { step in
-                                ActivityStepRow(step: step) {
-                                    viewModel.showActivityCard = true
-                                }
-                                .transition(.opacity.combined(with: .move(edge: .top)))
-                                .onAppear {
-                                    print("🎨 Completed step appeared: '\(step.label)'")
+                            VStack(spacing: 0) {
+                                ForEach(activity.completedSteps) { step in
+                                    ActivityStepRow(step: step) {
+                                        viewModel.showActivityCard = true
+                                    }
+                                    .transition(.opacity.combined(with: .move(edge: .top)))
+                                    .onAppear {
+                                        print("🎨 Completed step appeared: '\(step.label)'")
+                                    }
                                 }
                             }
                         }
