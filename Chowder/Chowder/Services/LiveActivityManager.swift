@@ -7,31 +7,32 @@ final class LiveActivityManager: @unchecked Sendable {
     static let shared = LiveActivityManager()
 
     private var currentActivity: Activity<ChowderActivityAttributes>?
-    /// Accumulated completed step labels for the current run.
-    private var completedStepLabels: [String] = []
+    /// When the current intent started (reset when intent text changes).
+    private var intentStartDate: Date = Date()
+    /// Last known current intent (tracked to know when it changes for the timer).
+    private var lastIntentText: String = ""
+    /// Last known state for use in endActivity.
+    private var lastState: ChowderActivityAttributes.ContentState?
 
     private init() {}
 
     // MARK: - Public API
 
     /// Start a new Live Activity when the user sends a message.
-    /// - Parameters:
-    ///   - agentName: The bot/agent display name.
-    ///   - userTask: The message the user sent (truncated for display).
     func startActivity(agentName: String, userTask: String) {
-        // End any stale activity from a previous run
         if currentActivity != nil {
             endActivity()
         }
 
-        completedStepLabels = []
+        intentStartDate = Date()
+        lastIntentText = ""
+        lastState = nil
 
         guard ActivityAuthorizationInfo().areActivitiesEnabled else {
             print("⚡ Live Activities not enabled — skipping")
             return
         }
 
-        // Truncate the user task for the Lock Screen
         let truncatedTask = userTask.count > 60
             ? String(userTask.prefix(57)) + "..."
             : userTask
@@ -41,10 +42,15 @@ final class LiveActivityManager: @unchecked Sendable {
             userTask: truncatedTask
         )
         let initialState = ChowderActivityAttributes.ContentState(
-            currentStep: "Thinking...",
-            completedSteps: [],
+            currentIntent: "Thinking...",
+            previousIntent: "Thinking...",
+            secondPreviousIntent: "Message received",
+            intentStartDate: Date(),
+            stepNumber: 1,
+            costTotal: nil,
             isFinished: false
         )
+        lastState = initialState
         let content = ActivityContent(state: initialState, staleDate: nil)
 
         do {
@@ -59,24 +65,36 @@ final class LiveActivityManager: @unchecked Sendable {
         }
     }
 
-    /// Update the Live Activity with a new current step and the latest completed steps.
-    /// - Parameters:
-    ///   - currentStep: Label of the step now in progress.
-    ///   - completedSteps: Labels of all completed steps so far.
-    func updateStep(_ currentStep: String, completedSteps: [String]) {
-        guard let activity = currentActivity else { return }
+    /// Update the Live Activity with new intent data.
+    func update(
+        currentIntent: String,
+        previousIntent: String?,
+        secondPreviousIntent: String?,
+        stepNumber: Int,
+        costTotal: String?
+    ) {
+        guard let _ = currentActivity else { return }
 
-        completedStepLabels = completedSteps
+        // Reset the timer when the intent text changes
+        if currentIntent != lastIntentText {
+            lastIntentText = currentIntent
+            intentStartDate = Date()
+        }
 
         let state = ChowderActivityAttributes.ContentState(
-            currentStep: currentStep,
-            completedSteps: completedSteps,
+            currentIntent: currentIntent,
+            previousIntent: previousIntent,
+            secondPreviousIntent: secondPreviousIntent,
+            intentStartDate: intentStartDate,
+            stepNumber: stepNumber,
+            costTotal: costTotal,
             isFinished: false
         )
+        lastState = state
         let content = ActivityContent(state: state, staleDate: nil)
 
         Task {
-            await activity.update(content)
+            await currentActivity?.update(content)
         }
     }
 
@@ -86,12 +104,17 @@ final class LiveActivityManager: @unchecked Sendable {
         currentActivity = nil
 
         let finalState = ChowderActivityAttributes.ContentState(
-            currentStep: "Done",
-            completedSteps: completedStepLabels,
+            currentIntent: "Done",
+            previousIntent: lastState?.currentIntent,
+            secondPreviousIntent: lastState?.previousIntent,
+            intentStartDate: lastState?.intentStartDate ?? Date(),
+            stepNumber: lastState?.stepNumber ?? 0,
+            costTotal: lastState?.costTotal,
             isFinished: true
         )
+        lastState = nil
+        lastIntentText = ""
         let content = ActivityContent(state: finalState, staleDate: nil)
-        completedStepLabels = []
 
         Task {
             await activity.end(content, dismissalPolicy: .after(.now + 8))

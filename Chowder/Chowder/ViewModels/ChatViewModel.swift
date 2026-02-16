@@ -93,6 +93,50 @@ final class ChatViewModel: ChatServiceDelegate {
         let derivedIntent: String
     }
 
+    // MARK: - Live Activity Tracking State
+
+    /// The latest step label (thinking or tool) -- shown ALL CAPS at the bottom.
+    private var liveActivityBottomText: String = "Thinking..."
+    /// The most recent thinking/intent step -- shown with the yellow arrow.
+    private var liveActivityYellowIntent: String?
+    /// The 2nd most recent thinking/intent step -- shown with the grey checkmark.
+    private var liveActivityGreyIntent: String?
+    /// Accumulated cost for the current run.
+    private var liveActivityCostAccumulator: Double = 0
+    /// Formatted accumulated cost string.
+    private var liveActivityCost: String?
+    /// Total step count for the Live Activity.
+    private var liveActivityStepNumber: Int = 1
+
+    /// Shift a new thinking intent into the yellow/grey stack.
+    /// Only call this for thinking steps -- NOT tool events.
+    private func shiftThinkingIntent(_ newIntent: String) {
+        guard newIntent != liveActivityYellowIntent else { return }
+        liveActivityGreyIntent = liveActivityYellowIntent
+        liveActivityYellowIntent = newIntent
+    }
+
+    /// Push current tracking state to the Live Activity.
+    private func pushLiveActivityUpdate() {
+        LiveActivityManager.shared.update(
+            currentIntent: liveActivityBottomText,
+            previousIntent: liveActivityYellowIntent,
+            secondPreviousIntent: liveActivityGreyIntent,
+            stepNumber: liveActivityStepNumber,
+            costTotal: liveActivityCost
+        )
+    }
+
+    /// Reset Live Activity tracking state for a new run.
+    private func resetLiveActivityState() {
+        liveActivityBottomText = "Thinking..."
+        liveActivityYellowIntent = "Thinking..."
+        liveActivityGreyIntent = "Message received"
+        liveActivityCostAccumulator = 0
+        liveActivityCost = nil
+        liveActivityStepNumber = 1
+    }
+
     // MARK: - Buffered Debug Logging
 
     /// Buffer for log entries — not observed by SwiftUI, so appends here are free.
@@ -194,6 +238,7 @@ final class ChatViewModel: ChatServiceDelegate {
         seenThinkingIds.removeAll()
         seenToolCallIds.removeAll()
         toolCallMetadata.removeAll()
+        resetLiveActivityState()
         log("shimmer started — label=\"Thinking...\"")
 
         messages.append(Message(role: .assistant, content: ""))
@@ -302,15 +347,66 @@ final class ChatViewModel: ChatServiceDelegate {
 
     func chatServiceDidReceiveError(_ error: Error) {
         log("ERROR: \(error.localizedDescription)")
+        let friendlyMessage = Self.friendlyErrorMessage(for: error)
         if let lastIndex = messages.indices.last,
            messages[lastIndex].role == .assistant,
            messages[lastIndex].content.isEmpty {
-            messages[lastIndex].content = "Error: \(error.localizedDescription)"
+            messages[lastIndex].content = friendlyMessage
         }
         isLoading = false
         currentActivity = nil
         LiveActivityManager.shared.endActivity()
         LocalStorage.saveMessages(messages)
+    }
+
+    /// Map raw system errors into short, human-friendly messages.
+    private static func friendlyErrorMessage(for error: Error) -> String {
+        // Handle our own gateway errors directly
+        if let chatError = error as? ChatServiceError {
+            switch chatError {
+            case .invalidURL:
+                return "Couldn't connect — the server address looks wrong. Check your settings."
+            case .gatewayError(let msg):
+                return "Something went wrong: \(msg)"
+            }
+        }
+
+        let nsError = error as NSError
+
+        // POSIX network errors (NSPOSIXErrorDomain)
+        if nsError.domain == NSPOSIXErrorDomain {
+            switch nsError.code {
+            case 53, 54, 57: // connection abort, reset, not connected
+                return "Connection lost — reconnecting automatically. Try sending your message again in a moment."
+            case 60: // operation timed out
+                return "The connection timed out. Check your network and try again."
+            case 61: // connection refused
+                return "Couldn't reach the server. Make sure it's running and try again."
+            default:
+                return "A network error occurred. Reconnecting..."
+            }
+        }
+
+        // URLSession / NSURLErrorDomain
+        if nsError.domain == NSURLErrorDomain {
+            switch nsError.code {
+            case NSURLErrorNotConnectedToInternet, NSURLErrorDataNotAllowed:
+                return "You're offline. Connect to the internet and try again."
+            case NSURLErrorTimedOut:
+                return "The request timed out. Check your connection and try again."
+            case NSURLErrorNetworkConnectionLost:
+                return "Connection lost — reconnecting automatically. Try again in a moment."
+            case NSURLErrorCannotFindHost, NSURLErrorCannotConnectToHost, NSURLErrorDNSLookupFailed:
+                return "Couldn't find the server. Check the address in settings."
+            case NSURLErrorSecureConnectionFailed, NSURLErrorServerCertificateUntrusted:
+                return "Couldn't establish a secure connection to the server."
+            default:
+                return "A connection error occurred. Reconnecting..."
+            }
+        }
+
+        // Fallback
+        return "Something went wrong. Reconnecting..."
     }
 
     func chatServiceDidLog(_ message: String) {
@@ -338,11 +434,10 @@ final class ChatViewModel: ChatServiceDelegate {
             )
         }
 
-        // Update the Live Activity on the Lock Screen
-        LiveActivityManager.shared.updateStep(
-            "Thinking...",
-            completedSteps: currentActivity?.completedSteps.map(\.label) ?? []
-        )
+        // Update the Live Activity -- thinking steps update the bottom AND shift the intent stack
+        liveActivityBottomText = "Thinking..."
+        liveActivityStepNumber = (currentActivity?.steps.count ?? 0) + 1
+        pushLiveActivityUpdate()
     }
 
     func chatServiceDidReceiveToolEvent(name: String, path: String?, args: [String: Any]?) {
@@ -367,11 +462,10 @@ final class ChatViewModel: ChatServiceDelegate {
         )
         log("Activity now has \(currentActivity?.steps.count ?? 0) total steps (\(currentActivity?.completedSteps.count ?? 0) completed)")
 
-        // Update the Live Activity on the Lock Screen
-        LiveActivityManager.shared.updateStep(
-            label,
-            completedSteps: currentActivity?.completedSteps.map(\.label) ?? []
-        )
+        // Update the Live Activity -- tool events only update the bottom row, not the intent stack
+        liveActivityBottomText = label
+        liveActivityStepNumber = (currentActivity?.steps.count ?? 0)
+        pushLiveActivityUpdate()
     }
 
     // MARK: - Friendly Tool Labels
@@ -499,6 +593,16 @@ final class ChatViewModel: ChatServiceDelegate {
             }
         }
         
+        // Accumulate usage/cost data if present at the item level
+        if let usage = item["usage"] as? [String: Any] {
+            if let cost = usage["cost"] as? [String: Any],
+               let total = cost["total"] as? Double, total > 0 {
+                liveActivityCostAccumulator += total
+                liveActivityCost = String(format: "$%.4f", liveActivityCostAccumulator)
+                log("💰 Cost accumulated: \(liveActivityCost!) (+\(total))")
+            }
+        }
+
         log("📋 Processing history item: role=\(role)")
         
         switch role {
@@ -603,19 +707,23 @@ final class ChatViewModel: ChatServiceDelegate {
         
         if let id = thinkingId, !seenThinkingIds.contains(id) {
             seenThinkingIds.insert(id)
-            log("💭 Thinking: \(cleanText)")
-            
+
+            // Prefer the summary field if the gateway provides it
+            let summary = contentItem["summary"] as? String
+            let intentLabel = summary ?? cleanText
+            log("💭 Thinking: \(intentLabel)")
+
             // Show as one-line progress
-            currentActivity?.currentLabel = cleanText + "..."
+            currentActivity?.currentLabel = intentLabel + "..."
             currentActivity?.steps.append(
-                ActivityStep(type: .thinking, label: cleanText, detail: "")
+                ActivityStep(type: .thinking, label: intentLabel, detail: "")
             )
 
-            // Update the Live Activity on the Lock Screen
-            LiveActivityManager.shared.updateStep(
-                cleanText + "...",
-                completedSteps: currentActivity?.completedSteps.map(\.label) ?? []
-            )
+            // Update the Live Activity -- thinking steps shift the intent stack AND update bottom
+            shiftThinkingIntent(intentLabel)
+            liveActivityBottomText = intentLabel + "..."
+            liveActivityStepNumber = (currentActivity?.steps.count ?? 0)
+            pushLiveActivityUpdate()
         } else {
             log("⚠️ Thinking already seen, skipping: \(thinkingId ?? "nil")")
         }
@@ -660,11 +768,10 @@ final class ChatViewModel: ChatServiceDelegate {
             ActivityStep(type: .toolCall, label: intent, detail: "")
         )
 
-        // Update the Live Activity on the Lock Screen
-        LiveActivityManager.shared.updateStep(
-            intent,
-            completedSteps: currentActivity?.completedSteps.map(\.label) ?? []
-        )
+        // Update the Live Activity -- tool events only update the bottom row
+        liveActivityBottomText = intent
+        liveActivityStepNumber = (currentActivity?.steps.count ?? 0)
+        pushLiveActivityUpdate()
     }
     
     /// Process toolResult items to show completion
@@ -673,6 +780,14 @@ final class ChatViewModel: ChatServiceDelegate {
             return
         }
         
+        // Accumulate cost from toolResult usage if present
+        if let usage = item["usage"] as? [String: Any],
+           let cost = usage["cost"] as? [String: Any],
+           let total = cost["total"] as? Double, total > 0 {
+            liveActivityCostAccumulator += total
+            liveActivityCost = String(format: "$%.4f", liveActivityCostAccumulator)
+        }
+
         // Skip if already processed
         guard !seenToolCallIds.contains(toolCallId) else {
             return

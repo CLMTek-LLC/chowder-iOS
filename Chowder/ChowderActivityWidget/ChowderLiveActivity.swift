@@ -5,68 +5,65 @@ import WidgetKit
 struct ChowderLiveActivity: Widget {
     var body: some WidgetConfiguration {
         ActivityConfiguration(for: ChowderActivityAttributes.self) { context in
-            // Lock Screen / StandBy banner
             lockScreenBanner(context: context)
         } dynamicIsland: { context in
             DynamicIsland {
-                // Expanded region (long-press on Dynamic Island)
                 DynamicIslandExpandedRegion(.leading) {
-                    PulsingDot(isFinished: context.state.isFinished)
-                        .frame(width: 12, height: 12)
-                        .padding(.top, 4)
+                    Circle()
+                        .fill(context.state.isFinished ? Color.green : Color.blue)
+                        .frame(width: 8, height: 8)
+                        .padding(.top, 6)
                 }
                 DynamicIslandExpandedRegion(.center) {
                     VStack(alignment: .leading, spacing: 4) {
-                        Text(context.attributes.agentName)
-                            .font(.headline)
-                        Text(context.state.currentStep)
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(2)
+                        Text(context.attributes.userTask)
+                            .font(.system(size: 15, weight: .medium))
+                            .lineLimit(1)
+                        if !context.state.isFinished {
+                            Text(context.state.currentIntent)
+                                .font(.system(size: 13))
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                        }
                     }
                 }
                 DynamicIslandExpandedRegion(.trailing) {
-                    if !context.state.isFinished && !context.state.completedSteps.isEmpty {
-                        Text("Step \(context.state.completedSteps.count + 1)")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
+                    Text("Step \(context.state.stepNumber)")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(.secondary)
                 }
                 DynamicIslandExpandedRegion(.bottom) {
-                    if !context.state.completedSteps.isEmpty {
-                        VStack(alignment: .leading, spacing: 3) {
-                            ForEach(context.state.completedSteps.suffix(4), id: \.self) { step in
-                                HStack(spacing: 6) {
-                                    Image(systemName: "checkmark")
-                                        .font(.system(size: 8, weight: .bold))
-                                        .foregroundStyle(.green)
-                                    Text(step)
-                                        .font(.caption2)
-                                        .foregroundStyle(.secondary)
-                                        .lineLimit(1)
-                                }
-                            }
+                    if let prev = context.state.previousIntent, !context.state.isFinished {
+                        HStack(spacing: 4) {
+                            Image(systemName: "arrow.turn.down.right")
+                                .font(.system(size: 9, weight: .bold))
+                                .foregroundStyle(.yellow)
+                            Text(prev)
+                                .font(.system(size: 11))
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
                         }
-                        .padding(.top, 4)
                     }
                 }
             } compactLeading: {
-                PulsingDot(isFinished: context.state.isFinished)
-                    .frame(width: 8, height: 8)
+                Circle()
+                    .fill(context.state.isFinished ? Color.green : Color.blue)
+                    .frame(width: 6, height: 6)
             } compactTrailing: {
                 if context.state.isFinished {
                     Text("Done")
                         .font(.caption2)
                         .foregroundStyle(.green)
                 } else {
-                    Text(context.state.currentStep)
+                    Text(context.state.currentIntent)
                         .font(.caption2)
                         .lineLimit(1)
                         .frame(maxWidth: 64)
                 }
             } minimal: {
-                PulsingDot(isFinished: context.state.isFinished)
-                    .frame(width: 8, height: 8)
+                Circle()
+                    .fill(context.state.isFinished ? Color.green : Color.blue)
+                    .frame(width: 6, height: 6)
             }
         }
     }
@@ -75,70 +72,138 @@ struct ChowderLiveActivity: Widget {
 
     @ViewBuilder
     private func lockScreenBanner(context: ActivityViewContext<ChowderActivityAttributes>) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            // Header: pulsing dot + agent name + task
-            HStack(spacing: 10) {
-                PulsingDot(isFinished: context.state.isFinished)
-                    .frame(width: 10, height: 10)
+        VStack(alignment: .leading, spacing: 0) {
+            // ── Row 1: User task + Cost ──
+            HStack {
+                Text(context.attributes.userTask)
+                    .font(.system(size: 12, weight: .regular))
+                    .foregroundStyle(.white)
+                    .lineLimit(1)
 
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(context.attributes.agentName)
-                        .font(.system(size: 14, weight: .semibold))
+                Spacer()
 
-                    Text(context.attributes.userTask)
-                        .font(.system(size: 12))
-                        .foregroundStyle(.secondary)
+                if let cost = context.state.costTotal {
+                    Text(cost)
+                        .font(.system(size: 12, weight: .medium, design: .monospaced))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3)
+                        .background(
+                            Capsule()
+                                .fill(Color.white.opacity(0.1))
+                        )
+                }
+            }
+            .padding(.bottom, 16)
+
+            // ── Row 2: Intent scroll stack ──
+            VStack(alignment: .leading, spacing: 0) {
+                // 2nd previous intent -- grey check, fading out
+                if let secondPrev = context.state.secondPreviousIntent, !context.state.isFinished {
+                    HStack(spacing: 6) {
+                        ZStack {
+                            Circle()
+                                .fill(Color.gray.opacity(0.2))
+                                .frame(width: 16, height: 16)
+                            Image(systemName: "checkmark")
+                                .font(.system(size: 9, weight: .bold))
+                                .foregroundStyle(Color.gray.opacity(0.4))
+                        }
+                        Text(secondPrev)
+                            .font(.system(size: 14, weight: .regular))
+                            .foregroundStyle(.white.opacity(0.1))
+                            .lineLimit(1)
+                    }
+                    .transition(.push(from: .bottom))
+                }
+
+                // Previous intent -- yellow arrow + "..."
+                if let prev = context.state.previousIntent, !context.state.isFinished {
+                    HStack(spacing: 6) {
+                        ZStack {
+                            Circle()
+                                .fill(Color.yellow)
+                                .frame(width: 22, height: 22)
+                            Image(systemName: "arrow.turn.down.right")
+                                .font(.system(size: 12, weight: .bold))
+                                .foregroundStyle(.black)
+                        }
+                        Text(prev + "...")
+                            .font(.system(size: 20, weight: .regular))
+                            .foregroundStyle(.white)
+                            .lineLimit(1)
+                            .mask(ShimmerMask())
+                    }
+                    .transition(.push(from: .bottom))
+                }
+
+                // Done state
+                if context.state.isFinished {
+                    HStack(spacing: 6) {
+                        ZStack {
+                            Circle()
+                                .fill(Color.green)
+                                .frame(width: 22, height: 22)
+                            Image(systemName: "checkmark")
+                                .font(.system(size: 12, weight: .bold))
+                                .foregroundStyle(.black)
+                        }
+                        Text("Done")
+                            .font(.system(size: 20, weight: .regular))
+                            .foregroundStyle(.white)
+                            .lineLimit(1)
+                    }
+                }
+            }
+            .padding(.bottom, 20)
+
+            // ── Row 3: Current intent (ALL CAPS) + Timer + Step ──
+            HStack {
+                if !context.state.isFinished {
+                    Text(context.state.currentIntent)
+                        .font(.system(size: 12, weight: .medium, design: .monospaced))
+                        .foregroundStyle(.white.opacity(0.5))
+                        .textCase(.uppercase)
                         .lineLimit(1)
+                        .contentTransition(.numericText())
+
+                    Text(
+                        timerInterval: context.state.intentStartDate...Date.now.addingTimeInterval(3600),
+                        countsDown: false
+                    )
+                    .font(.system(size: 12, weight: .medium, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.5))
+                    .frame(width: 56, alignment: .leading)
                 }
 
                 Spacer()
 
-                if context.state.isFinished {
-                    Text("Done")
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(.green)
-                }
-            }
-
-            // Steps list: completed steps + current in-progress step
-            VStack(alignment: .leading, spacing: 4) {
-                ForEach(context.state.completedSteps.suffix(5), id: \.self) { step in
-                    HStack(spacing: 6) {
-                        Image(systemName: "checkmark")
-                            .font(.system(size: 9, weight: .bold))
-                            .foregroundStyle(.green)
-                        Text(step)
-                            .font(.system(size: 12))
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                    }
-                }
-
-                // Current in-progress step (not finished)
-                if !context.state.isFinished {
-                    HStack(spacing: 6) {
-                        Circle()
-                            .fill(Color.blue)
-                            .frame(width: 6, height: 6)
-                        Text(context.state.currentStep)
-                            .font(.system(size: 12, weight: .medium))
-                            .lineLimit(1)
-                    }
-                }
+                Text("Step \(context.state.stepNumber)")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(.white)
+                    .contentTransition(.numericText())
             }
         }
         .padding(16)
+        .activityBackgroundTint(.black)
     }
 }
 
-// MARK: - Pulsing Dot
+// MARK: - Shimmer Mask
 
-/// A small circle that gently scales up and down to indicate activity.
-struct PulsingDot: View {
-    var isFinished: Bool
-
+/// A gradient mask that gives a soft shimmer effect on the active intent text.
+struct ShimmerMask: View {
     var body: some View {
-        Circle()
-            .fill(isFinished ? Color.green : Color.blue)
+        LinearGradient(
+            stops: [
+                .init(color: .white.opacity(0.4), location: 0),
+                .init(color: .white, location: 0.3),
+                .init(color: .white, location: 0.7),
+                .init(color: .white.opacity(0.4), location: 1.0)
+            ],
+            startPoint: .leading,
+            endPoint: .trailing
+        )
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
