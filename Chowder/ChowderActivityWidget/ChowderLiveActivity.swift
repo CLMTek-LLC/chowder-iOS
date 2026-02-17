@@ -70,65 +70,92 @@ struct ChowderLiveActivity: Widget {
             }
         }
     }
+}
 
-    // MARK: - Lock Screen Banner
+// MARK: - Lock Screen Banner
 
-    @ViewBuilder
-    private func lockScreenBanner(context: ActivityViewContext<ChowderActivityAttributes>) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            // Header: pulsing dot + agent name + task
-            HStack(spacing: 10) {
-                PulsingDot(isFinished: context.state.isFinished)
-                    .frame(width: 10, height: 10)
+@ViewBuilder
+private func lockScreenBanner(context: ActivityViewContext<ChowderActivityAttributes>) -> some View {
+    let steps = context.state.completedSteps.suffix(5)
+    
+    VStack(alignment: .leading, spacing: 8) {
+        // Header: pulsing dot + agent name + task
+        HStack(spacing: 10) {
+            Text(context.attributes.userTask)
+                .font(.callout.bold())
+                .foregroundStyle(.white)
+                .lineLimit(1)
 
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(context.attributes.agentName)
-                        .font(.system(size: 14, weight: .semibold))
-
-                    Text(context.attributes.userTask)
-                        .font(.system(size: 12))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
+            Spacer()
+            
+            Text(steps.count > 2 ? "$11.23" : "$0.49")
+                .foregroundStyle(.white)
+                .font(.subheadline)
+                .padding(.vertical, 4)
+                .padding(.horizontal, 8)
+                .overlay {
+                    Capsule()
+                        .stroke(Color.white.opacity(0.24))
                 }
+                .background(steps.count > 2 ? Color.red : Color.black, in: .capsule)
 
-                Spacer()
+            
+        }
+        .padding(.leading, 8)
 
-                if context.state.isFinished {
-                    Text("Done")
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(.green)
-                }
-            }
-
-            // Steps list: completed steps + current in-progress step
-            VStack(alignment: .leading, spacing: 4) {
-                ForEach(context.state.completedSteps.suffix(5), id: \.self) { step in
-                    HStack(spacing: 6) {
-                        Image(systemName: "checkmark")
-                            .font(.system(size: 9, weight: .bold))
-                            .foregroundStyle(.green)
-                        Text(step)
-                            .font(.system(size: 12))
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                    }
-                }
-
-                // Current in-progress step (not finished)
-                if !context.state.isFinished {
-                    HStack(spacing: 6) {
+        ZStack {
+            ForEach(Array(steps.enumerated()), id: \.self.element) { (index, step) in
+                let isPrevious = index == steps.count - 2
+                let isOld = index < steps.count - 2
+                
+                if !isOld {
+                    HStack(spacing: 10) {
                         Circle()
-                            .fill(Color.blue)
-                            .frame(width: 6, height: 6)
-                        Text(context.state.currentStep)
-                            .font(.system(size: 12, weight: .medium))
-                            .lineLimit(1)
+                            .stroke(.black.opacity(0.18), lineWidth: 3)
+                            .frame(width: 15)
+                        
+                        Text(step)
+                            .font(.callout)
+                            .foregroundStyle(.black)
+                            .frame(height: 60)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        
+                        Image(systemName: "chevron.right")
+                            .font(.subheadline.bold())
+                            .opacity(0.5)
                     }
+                    .transition(.asymmetric(insertion: .offset(y: 120), removal: .opacity.animation(.default.delay(2))))
+                    .padding(12)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .frame(height: 60)
+                    .background(Color.white, in: .rect(cornerRadius: isPrevious ? 12 : 16, style: .continuous))
+                    .scaleEffect(isPrevious ? 0.92 : 1)
+                    .offset(y: isPrevious ? 10 : 0)
+                    .opacity(isPrevious ? 0.72 : 1)
                 }
             }
         }
-        .padding(16)
+        .padding(.top, 4)
+        .padding(.bottom, 10)
+        
+        HStack(spacing: 6) {
+            Image(systemName: "safari.fill")
+            Text("Using the browser")
+                .font(.callout.bold())
+                .foregroundStyle(.white)
+                .lineLimit(1)
+            Spacer()
+            Text("02:11")
+                .opacity(0.5)
+        }
+        .font(.subheadline.bold())
+        .foregroundStyle(.white)
+        .padding(.leading, 8)
+        .padding(.trailing, 12)
     }
+    .padding(12)
+    .background(Color.black)
+    .activityBackgroundTint(.black.opacity(0.2))
 }
 
 // MARK: - Pulsing Dot
@@ -141,4 +168,44 @@ struct PulsingDot: View {
         Circle()
             .fill(isFinished ? Color.green : Color.blue)
     }
+}
+
+// MARK: - Previews
+
+#Preview("Lock Screen - In Progress", as: .content, using: ChowderActivityAttributes.preview) {
+    ChowderLiveActivity()
+} contentStates: {
+    ChowderActivityAttributes.ContentState.step1
+    ChowderActivityAttributes.ContentState.step2
+    ChowderActivityAttributes.ContentState.step3
+    ChowderActivityAttributes.ContentState.step4
+    ChowderActivityAttributes.ContentState.step5
+    ChowderActivityAttributes.ContentState.finished
+}
+
+#Preview("Lock Screen - Finished", as: .content, using: ChowderActivityAttributes.preview) {
+    ChowderLiveActivity()
+} contentStates: {
+    ChowderActivityAttributes.ContentState.finished
+}
+
+#Preview("Dynamic Island Compact", as: .dynamicIsland(.compact), using: ChowderActivityAttributes.preview) {
+    ChowderLiveActivity()
+} contentStates: {
+    ChowderActivityAttributes.ContentState.inProgress
+    ChowderActivityAttributes.ContentState.finished
+}
+
+#Preview("Dynamic Island Minimal", as: .dynamicIsland(.minimal), using: ChowderActivityAttributes.preview) {
+    ChowderLiveActivity()
+} contentStates: {
+    ChowderActivityAttributes.ContentState.inProgress
+    ChowderActivityAttributes.ContentState.finished
+}
+
+#Preview("Dynamic Island Expanded", as: .dynamicIsland(.expanded), using: ChowderActivityAttributes.preview) {
+    ChowderLiveActivity()
+} contentStates: {
+    ChowderActivityAttributes.ContentState.inProgress
+    ChowderActivityAttributes.ContentState.finished
 }
