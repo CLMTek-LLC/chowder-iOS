@@ -1,0 +1,20 @@
+{
+  "aps": {
+    "timestamp": 1708300000,
+    "event": "start",
+    "content-state": {
+      "currentStep": "Starting from push notification...",
+      "completedSteps": [],
+      "isFinished": false
+    },
+    "attributes-type": "ChowderActivityAttributes",
+    "attributes": {
+      "agentName": "Claude",
+      "userTask": "Demo task from push notification"
+    },
+    "alert": {
+      "title": "Task Started",
+      "body": "Demo task from push notification"
+    }
+  }
+}

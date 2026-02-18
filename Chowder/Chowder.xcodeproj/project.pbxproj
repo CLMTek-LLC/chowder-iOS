@@ -51,6 +51,7 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		0BF126C02F46095C00E30177 /* ChowderActivityWidgetExtension.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = ChowderActivityWidgetExtension.entitlements; sourceTree = "<group>"; };
 		D532BA452F3BEB5700F25210 /* Chowder.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Chowder.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		D532BA532F3BEB5700F25210 /* ChowderTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ChowderTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		D532BA5D2F3BEB5700F25210 /* ChowderUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ChowderUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -140,6 +141,7 @@
 		D532BA3C2F3BEB5700F25210 = {
 			isa = PBXGroup;
 			children = (
+				0BF126C02F46095C00E30177 /* ChowderActivityWidgetExtension.entitlements */,
 				D532BA472F3BEB5700F25210 /* Chowder */,
 				D588E0AB2F3EFEEF00A6D06D /* ChowderActivityWidget */,
 				D588E0A62F3EFEEF00A6D06D /* Frameworks */,
@@ -698,6 +700,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				ASSETCATALOG_COMPILER_WIDGET_BACKGROUND_COLOR_NAME = WidgetBackground;
+				CODE_SIGN_ENTITLEMENTS = ChowderActivityWidgetExtension.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = 433N42F295;
@@ -733,6 +736,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				ASSETCATALOG_COMPILER_WIDGET_BACKGROUND_COLOR_NAME = WidgetBackground;
+				CODE_SIGN_ENTITLEMENTS = ChowderActivityWidgetExtension.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = 433N42F295;

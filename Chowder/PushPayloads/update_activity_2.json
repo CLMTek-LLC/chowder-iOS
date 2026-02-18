@@ -1,0 +1,14 @@
+{
+  "aps": {
+    "timestamp": 1708300002,
+    "event": "update",
+    "content-state": {
+      "currentStep": "Analyzing results...",
+      "completedSteps": [
+        "Started from push notification",
+        "Searched the web"
+      ],
+      "isFinished": false
+    }
+  }
+}

@@ -1,5 +1,8 @@
 import ActivityKit
 import Foundation
+import os.log
+
+private let logger = Logger(subsystem: "app.chowder.Chowder", category: "LiveActivity")
 
 /// Manages the Live Activity that shows agent thinking steps on the Lock Screen.
 final class LiveActivityManager: @unchecked Sendable {
@@ -11,6 +14,44 @@ final class LiveActivityManager: @unchecked Sendable {
     private var completedStepLabels: [String] = []
 
     private init() {}
+
+    // MARK: - Push Token Observation
+
+    /// Start observing push-to-start tokens. Call this once at app launch.
+    /// The token allows APNs to start a Live Activity remotely (iOS 17.2+).
+    func observePushToStartToken() {
+        Task {
+            for await tokenData in Activity<ChowderActivityAttributes>.pushToStartTokenUpdates {
+                let token = tokenData.hexString
+                logger.notice("Push-to-Start Token: \(token, privacy: .public)")
+            }
+        }
+    }
+
+    /// Observe for activities started via push notification.
+    /// This is needed to track activities that iOS creates from push-to-start.
+    func observeActivityUpdates() {
+        Task {
+            for await activity in Activity<ChowderActivityAttributes>.activityUpdates {
+                logger.notice("Activity update received! ID: \(activity.id, privacy: .public)")
+                logger.notice("Activity state: \(String(describing: activity.content.state), privacy: .public)")
+                
+                // Observe push token for this activity
+                observeActivityPushToken(for: activity)
+            }
+        }
+    }
+
+    /// Observe push token updates for the current activity.
+    /// The token allows APNs to update/end an existing Live Activity.
+    private func observeActivityPushToken(for activity: Activity<ChowderActivityAttributes>) {
+        Task {
+            for await tokenData in activity.pushTokenUpdates {
+                let token = tokenData.hexString
+                logger.notice("Activity Push Token (for updates): \(token, privacy: .public)")
+            }
+        }
+    }
 
     // MARK: - Public API
 
@@ -51,9 +92,13 @@ final class LiveActivityManager: @unchecked Sendable {
             currentActivity = try Activity.request(
                 attributes: attributes,
                 content: content,
-                pushType: nil
+                pushType: .token
             )
             print("⚡ Live Activity started: \(currentActivity?.id ?? "?")")
+
+            if let activity = currentActivity {
+                observeActivityPushToken(for: activity)
+            }
         } catch {
             print("⚡ Failed to start Live Activity: \(error.localizedDescription)")
         }
@@ -97,5 +142,14 @@ final class LiveActivityManager: @unchecked Sendable {
             await activity.end(content, dismissalPolicy: .after(.now + 8))
             print("⚡ Live Activity ended")
         }
+    }
+}
+
+// MARK: - Data Extension for Hex String
+
+extension Data {
+    /// Converts Data to a hexadecimal string representation (used for APNs tokens).
+    var hexString: String {
+        map { String(format: "%02x", $0) }.joined()
     }
 }
