@@ -42,18 +42,6 @@ struct Sheet: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color(.systemBackground))
-        .persistentBottomSheet(
-            isExpanded: $isSheetExpanded,
-            collapsedHeight: 100,
-            expandedHeight: 400,
-            placeholder: "OddJob is ready",
-            onSendMessage: { message in
-                messages.append(message)
-            },
-            onSelectImages: { images in
-                print("Selected \(images.count) images")
-            }
-        )
     }
 }
 
