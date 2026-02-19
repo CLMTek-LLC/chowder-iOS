@@ -880,7 +880,7 @@ final class ChatViewModel: ChatServiceDelegate {
         )
 
         // Update the Live Activity on the Lock Screen
-        LiveActivityManager.shared.updateIntent(intent)
+        LiveActivityManager.shared.updateIntent(intent.label)
     }
     
     /// Process toolResult items to show completion

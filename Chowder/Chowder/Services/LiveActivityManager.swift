@@ -7,59 +7,43 @@ final class LiveActivityManager: @unchecked Sendable {
     static let shared = LiveActivityManager()
 
     private var currentActivity: Activity<ChowderActivityAttributes>?
-    /// Track intents for stacking display
-    private var currentIntent: String = ""
-    private var previousIntent: String?
-    private var secondPreviousIntent: String?
-    private var stepNumber: Int = 0
     private var intentStartDate: Date = Date()
-    private var subject: String?
-    private var costTotal: String?
 
     private init() {}
 
     // MARK: - Public API
 
     /// Start a new Live Activity when the user sends a message.
-    /// - Parameter subject: Optional AI-generated subject to display immediately.
+    /// - Parameters:
+    ///   - agentName: The bot/agent display name.
+    ///   - userTask: The message the user sent (truncated for display).
+    ///   - subject: Optional AI-generated subject to display immediately.
     func startActivity(agentName: String, userTask: String, subject: String? = nil) {
         if currentActivity != nil {
             endActivity()
         }
 
-        // Reset tracking state
-        currentIntent = "Thinking..."
-        previousIntent = nil
-        secondPreviousIntent = nil
-        stepNumber = 1
         intentStartDate = Date()
-        subject = nil
-        costTotal = nil
 
         guard ActivityAuthorizationInfo().areActivitiesEnabled else {
             print("⚡ Live Activities not enabled — skipping")
             return
         }
 
-        let truncatedTask = userTask.count > 60
-            ? String(userTask.prefix(57)) + "..."
-            : userTask
-
         let attributes = ChowderActivityAttributes(
             agentName: agentName,
-            userTask: truncatedTask
+            userTask: userTask
         )
         let initialState = ChowderActivityAttributes.ContentState(
-            subject: nil,
-            currentIntent: currentIntent,
+            subject: subject,
+            currentIntent: "Thinking...",
             previousIntent: nil,
             secondPreviousIntent: nil,
             intentStartDate: intentStartDate,
-            stepNumber: stepNumber,
+            stepNumber: 1,
             costTotal: nil,
             isFinished: false
         )
-        lastState = initialState
         let content = ActivityContent(state: initialState, staleDate: nil)
 
         do {
@@ -74,33 +58,32 @@ final class LiveActivityManager: @unchecked Sendable {
         }
     }
 
-    /// Update the Live Activity with a new intent.
+    /// Update the Live Activity with full state from the caller.
+    /// This is the primary update method used by ChatViewModel which manages its own state.
     /// - Parameters:
-    ///   - intent: The new current intent description.
-    ///   - subject: Optional subject line (latched from first thinking summary).
-    ///   - cost: Optional formatted cost string (e.g. "$0.49").
-    func updateIntent(_ intent: String, subject: String? = nil, cost: String? = nil) {
+    ///   - subject: Subject line for the activity (AI-generated or latched from first intent).
+    ///   - currentIntent: The current step label shown at the bottom.
+    ///   - previousIntent: The most recent completed intent (yellow arrow).
+    ///   - secondPreviousIntent: The 2nd most recent intent (grey, fading out).
+    ///   - stepNumber: The total step count.
+    ///   - costTotal: Formatted cost string (e.g. "$0.049").
+    ///   - isAISubject: Whether the subject was AI-generated (for potential future use).
+    func update(
+        subject: String?,
+        currentIntent: String,
+        previousIntent: String?,
+        secondPreviousIntent: String?,
+        stepNumber: Int,
+        costTotal: String?,
+        isAISubject: Bool = false
+    ) {
         guard let activity = currentActivity else { return }
 
-        // Shift intents down the stack
-        secondPreviousIntent = previousIntent
-        previousIntent = currentIntent
-        currentIntent = intent
-        stepNumber += 1
+        // Reset timer when intent changes
         intentStartDate = Date()
-        
-        // Latch subject from first non-nil value
-        if self.subject == nil, let newSubject = subject {
-            self.subject = newSubject
-        }
-        
-        // Update cost if provided
-        if let newCost = cost {
-            self.costTotal = newCost
-        }
 
         let state = ChowderActivityAttributes.ContentState(
-            subject: self.subject,
+            subject: subject,
             currentIntent: currentIntent,
             previousIntent: previousIntent,
             secondPreviousIntent: secondPreviousIntent,
@@ -116,29 +99,19 @@ final class LiveActivityManager: @unchecked Sendable {
         }
     }
 
-    /// Update just the cost without changing intents.
-    /// - Parameter cost: The formatted cost string (e.g. "$0.49").
-    func updateCost(_ cost: String) {
-        guard let activity = currentActivity else { return }
-        
-        costTotal = cost
-
-        let state = ChowderActivityAttributes.ContentState(
-            subject: subject,
-            currentIntent: currentIntent,
-            previousIntent: previousIntent,
-            secondPreviousIntent: secondPreviousIntent,
-            intentStartDate: intentStartDate,
-            stepNumber: stepNumber,
-            costTotal: costTotal,
-            isFinished: false
+    /// Convenience method to update with just a new intent string.
+    /// Shifts intents internally - use `update(...)` for full control.
+    func updateIntent(_ intent: String) {
+        guard currentActivity != nil else { return }
+        // This is a simplified update - ChatViewModel manages full state
+        update(
+            subject: nil,
+            currentIntent: intent,
+            previousIntent: nil,
+            secondPreviousIntent: nil,
+            stepNumber: 1,
+            costTotal: nil
         )
-        lastState = state
-        let content = ActivityContent(state: state, staleDate: nil)
-
-        Task {
-            await currentActivity?.update(content)
-        }
     }
 
     /// End the Live Activity. Shows a brief "Done" state before dismissing.
@@ -147,28 +120,16 @@ final class LiveActivityManager: @unchecked Sendable {
         currentActivity = nil
 
         let finalState = ChowderActivityAttributes.ContentState(
-            subject: subject,
+            subject: nil,
             currentIntent: "Complete",
-            previousIntent: previousIntent,
+            previousIntent: nil,
             secondPreviousIntent: nil,
             intentStartDate: intentStartDate,
-            stepNumber: stepNumber,
-            costTotal: costTotal,
+            stepNumber: 0,
+            costTotal: nil,
             isFinished: true
         )
-        lastState = nil
-        lastIntentText = ""
-        latchedSubject = nil
-        subjectIsFromAI = false
         let content = ActivityContent(state: finalState, staleDate: nil)
-
-        // Reset tracking state
-        currentIntent = ""
-        previousIntent = nil
-        secondPreviousIntent = nil
-        stepNumber = 0
-        subject = nil
-        costTotal = nil
 
         Task {
             await activity.end(content, dismissalPolicy: .after(.now + 8))
