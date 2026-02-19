@@ -59,14 +59,14 @@ extension ChowderActivityAttributes.ContentState {
 
     static var finished: ChowderActivityAttributes.ContentState {
         ChowderActivityAttributes.ContentState(
-            subject: "Train to Margate",
-            currentIntent: "Confirming booking",
-            previousIntent: "Entering passenger details",
-            secondPreviousIntent: "Found the 10:15 departure—best price!",
+            subject: "Your train to Margate has been booked",
+            currentIntent: "Complete",
+            previousIntent: nil,
+            secondPreviousIntent: nil,
             intentStartDate: Date(),
             intentEndDate: Date.now.addingTimeInterval(360),
             stepNumber: 5,
-            costTotal: "$1.23",
+            costTotal: "$1.23"
         )
     }
 

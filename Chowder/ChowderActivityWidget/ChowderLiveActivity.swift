@@ -166,7 +166,7 @@ struct ChowderLiveActivity: Widget {
                             .frame(width: 21)
                             .background(Color.white, in: .circle)
                             .compositingGroup()
-                        Text("Your tickets have been booked")
+                        Text(state.subject ?? "Task complete")
                             .font(.subheadline.bold())
                     }
                     .frame(maxWidth: .infinity)

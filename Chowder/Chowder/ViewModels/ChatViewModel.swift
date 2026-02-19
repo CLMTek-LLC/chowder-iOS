@@ -155,6 +155,18 @@ final class ChatViewModel: ChatServiceDelegate {
         liveActivitySubject = nil
     }
 
+    /// Generate a completion summary message from the task title.
+    /// Returns nil if no task title is available or generation fails.
+    private func generateCompletionSummary(from taskTitle: String?) async -> String? {
+        guard let taskTitle = taskTitle, !taskTitle.isEmpty else {
+            log("📝 No task title for completion summary")
+            return nil
+        }
+        let summary = await TaskSummaryService.shared.generateCompletionMessage(for: taskTitle)
+        log("📝 Completion summary: \(summary ?? "nil")")
+        return summary
+    }
+
     // MARK: - Buffered Debug Logging
 
     /// Buffer for log entries — not observed by SwiftUI, so appends here are free.
@@ -337,7 +349,13 @@ final class ChatViewModel: ChatServiceDelegate {
                 currentActivity = nil
                 shimmerStartTime = nil
                 // End the Lock Screen Live Activity now that the answer is streaming
-                LiveActivityManager.shared.endActivity()
+                let taskTitle = liveActivitySubject
+                Task {
+                    let completionSummary = await generateCompletionSummary(from: taskTitle)
+                    await MainActor.run {
+                        LiveActivityManager.shared.endActivity(completionSummary: completionSummary)
+                    }
+                }
                 log("Cleared activity on first delta")
             }
         }
@@ -365,8 +383,14 @@ final class ChatViewModel: ChatServiceDelegate {
             log("Preserved activity with \(activity.steps.count) steps")
         }
         
-        // End the Lock Screen Live Activity
-        LiveActivityManager.shared.endActivity()
+        // End the Lock Screen Live Activity with completion summary
+        let taskTitle = liveActivitySubject
+        Task {
+            let completionSummary = await generateCompletionSummary(from: taskTitle)
+            await MainActor.run {
+                LiveActivityManager.shared.endActivity(completionSummary: completionSummary)
+            }
+        }
 
         // Clear current activity to prevent late history items from appearing
         currentActivity = nil

@@ -53,4 +53,52 @@ actor TaskSummaryService {
             return nil
         }
     }
+
+    /// Generate a completion message from a task title.
+    /// Transforms an imperative title like "Book train tickets" into a past-tense completion
+    /// message like "Your tickets have been booked".
+    /// Returns nil if Foundation Models is unavailable or generation fails.
+    func generateCompletionMessage(for taskTitle: String) async -> String? {
+        guard !taskTitle.isEmpty else {
+            print("📝 TaskSummaryService: No task title provided")
+            return nil
+        }
+
+        let availability = SystemLanguageModel.default.availability
+        guard availability == .available else {
+            print("📝 TaskSummaryService: Model not available - \(availability)")
+            return nil
+        }
+
+        let session = LanguageModelSession(model: .init(useCase: .general, guardrails: .permissiveContentTransformations))
+
+        let prompt = """
+        Transform this task title into a short completion message that tells the user the task is done.
+
+        Task title: "\(taskTitle)"
+
+        Rules:
+        - Convert from imperative/present tense to past tense
+        - Start with "Your" when appropriate (e.g., "Book train tickets" → "Your tickets have been booked")
+        - Keep it concise (under 8 words)
+        - Make it sound like a friendly notification
+        - Do not use exclamation marks
+
+        Examples:
+        - "Book train tickets" → "Your tickets have been booked"
+        - "Find restaurants nearby" → "Restaurants found nearby"
+        - "Send email to John" → "Your email has been sent to John"
+        - "Check weather forecast" → "Weather forecast retrieved"
+
+        Only output the completion message, nothing else.
+        """
+
+        do {
+            let response = try await session.respond(to: prompt)
+            return response.content.trimmingCharacters(in: .whitespacesAndNewlines)
+        } catch {
+            print("📝 TaskSummaryService: Completion message generation failed - \(error)")
+            return nil
+        }
+    }
 }

@@ -113,19 +113,20 @@ final class LiveActivityManager: @unchecked Sendable {
     }
 
     /// End the Live Activity. Shows a brief "Done" state before dismissing.
-    func endActivity() {
+    /// - Parameter completionSummary: Optional completion message to display (e.g. "Your tickets have been booked").
+    func endActivity(completionSummary: String? = nil) {
         guard let activity = currentActivity else { return }
         currentActivity = nil
 
         let finalState = ChowderActivityAttributes.ContentState(
-            subject: nil,
+            subject: completionSummary,
             currentIntent: "Complete",
             previousIntent: nil,
             secondPreviousIntent: nil,
             intentStartDate: intentStartDate,
             intentEndDate: .now,
             stepNumber: 0,
-            costTotal: nil,
+            costTotal: nil
         )
         let content = ActivityContent(state: finalState, staleDate: nil)
 
