@@ -133,6 +133,7 @@ struct ChatView: View {
             ChatHeaderView(
                 botName: viewModel.botName,
                 isOnline: viewModel.isConnected,
+                taskSummary: viewModel.currentTaskSummary,
                 onSettingsTapped: { viewModel.showSettings = true },
                 onDebugTapped: { viewModel.showDebugLog = true }
             )

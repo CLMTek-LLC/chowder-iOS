@@ -56,6 +56,11 @@ final class ChatViewModel: ChatServiceDelegate {
     /// Controls presentation of the activity detail card.
     var showActivityCard: Bool = false
 
+    /// The current task summary title (AI-generated), shown in the chat header during active tasks.
+    var currentTaskSummary: String? {
+        liveActivitySubject
+    }
+
     private var shimmerStartTime: Date?
 
     /// Light haptic fired once when the assistant's response starts streaming.
@@ -127,14 +132,15 @@ final class ChatViewModel: ChatServiceDelegate {
     }
 
     /// Push current tracking state to the Live Activity.
-    private func pushLiveActivityUpdate() {
+    private func pushLiveActivityUpdate(isAISubject: Bool = false) {
         LiveActivityManager.shared.update(
             subject: liveActivitySubject,
             currentIntent: liveActivityBottomText,
             previousIntent: liveActivityYellowIntent,
             secondPreviousIntent: liveActivityGreyIntent,
             stepNumber: liveActivityStepNumber,
-            costTotal: liveActivityCost
+            costTotal: liveActivityCost,
+            isAISubject: isAISubject
         )
     }
 
@@ -259,8 +265,26 @@ final class ChatViewModel: ChatServiceDelegate {
 
         LocalStorage.saveMessages(messages)
 
-        // Start the Lock Screen Live Activity
-        LiveActivityManager.shared.startActivity(agentName: botName, userTask: text)
+        // Start the Live Activity immediately (subject will be updated when ready)
+        let agentName = botName
+        LiveActivityManager.shared.startActivity(agentName: agentName, userTask: text, subject: nil)
+
+        // Generate AI summary for every message sent
+        // Include up to the last 5 user messages to identify the overall task
+        let recentUserMessages = Array(messages
+            .filter { $0.role == .user }
+            .suffix(5)
+            .map { $0.content })
+        log("📝 Generating summary for \(recentUserMessages.count) messages: \(recentUserMessages)")
+        Task {
+            let summary = await TaskSummaryService.shared.generateTitle(for: recentUserMessages)
+            await MainActor.run {
+                self.log("📝 Summary result: \(summary ?? "nil")")
+                self.liveActivitySubject = summary
+                // Update the Live Activity with the generated subject
+                self.pushLiveActivityUpdate(isAISubject: true)
+            }
+        }
 
         chatService?.send(text: text)
         log("chatService.send() called")
