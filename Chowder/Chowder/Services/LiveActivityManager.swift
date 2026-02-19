@@ -41,8 +41,7 @@ final class LiveActivityManager: @unchecked Sendable {
             secondPreviousIntent: nil,
             intentStartDate: intentStartDate,
             stepNumber: 1,
-            costTotal: nil,
-            isFinished: false
+            costTotal: nil
         )
         let content = ActivityContent(state: initialState, staleDate: nil)
 
@@ -89,8 +88,7 @@ final class LiveActivityManager: @unchecked Sendable {
             secondPreviousIntent: secondPreviousIntent,
             intentStartDate: intentStartDate,
             stepNumber: stepNumber,
-            costTotal: costTotal,
-            isFinished: false
+            costTotal: costTotal
         )
         let content = ActivityContent(state: state, staleDate: nil)
 
@@ -125,9 +123,9 @@ final class LiveActivityManager: @unchecked Sendable {
             previousIntent: nil,
             secondPreviousIntent: nil,
             intentStartDate: intentStartDate,
+            intentEndDate: .now,
             stepNumber: 0,
             costTotal: nil,
-            isFinished: true
         )
         let content = ActivityContent(state: finalState, staleDate: nil)
 

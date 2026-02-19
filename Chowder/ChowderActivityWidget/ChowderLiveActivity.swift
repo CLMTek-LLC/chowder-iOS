@@ -80,6 +80,13 @@ struct ChowderLiveActivity: Widget {
         
         let isWaiting = intents.isEmpty
         
+        @Environment(\.colorScheme) var colorScheme
+        
+        
+        let primaryForeground: Color = colorScheme == .dark ? .white : Color(uiColor: .init(red: 47/255, green: 59/255, blue: 84/255, alpha: 1))
+        let systemBackground: Color = Color(uiColor: .systemBackground)
+        let userTaskOpacity: CGFloat = colorScheme == .dark ? 0.24 : 0.12
+        
         VStack(alignment: .leading, spacing: 4) {
             // Header: task + cost badge
             HStack(spacing: 10) {
@@ -92,11 +99,11 @@ struct ChowderLiveActivity: Widget {
                         .clipShape(.circle)
                         .overlay {
                             Circle()
-                                .stroke(Color.black.opacity(0.12))
+                                .stroke(primaryForeground.opacity(0.12))
                         }
                     
                     Group {
-                        if intents.isEmpty {
+                        if intents.isEmpty || state.isFinished {
                             Text(context.attributes.agentName)
                         } else {
                             Text(state.subject ?? "Figuring it out")
@@ -104,7 +111,7 @@ struct ChowderLiveActivity: Widget {
                         }
                     }
                     .font(.callout.bold())
-                    .foregroundStyle(.primary.opacity(0.72))
+                    .foregroundStyle(primaryForeground.opacity(0.72))
                     .lineLimit(1)
                     .transition(.blurReplace)
                 }
@@ -116,6 +123,7 @@ struct ChowderLiveActivity: Widget {
                 
                 if let cost = state.costTotal {
                     let alert = !cost.contains("$0")
+                    
                     Text(cost)
                         .font(.subheadline)
                         .fontWeight(.regular)
@@ -123,9 +131,9 @@ struct ChowderLiveActivity: Widget {
                         .padding(.horizontal, 8)
                         .overlay {
                             Capsule()
-                                .stroke(Color.black.opacity(alert ? 0.06 : 0.12))
+                                .stroke(primaryForeground.opacity(alert ? 0.06 : 0.12))
                         }
-                        .background(Color.black.opacity(alert ? 0.12 : 0), in: .capsule)
+                        .background(primaryForeground.opacity(alert ? 0.12 : 0), in: .capsule)
                         .monospacedDigit()
                 } else {
                     HStack(spacing: 5) {
@@ -138,6 +146,7 @@ struct ChowderLiveActivity: Widget {
                         Text("OpenClaw")
                             .foregroundStyle(.secondary)
                     }
+                    .transition(.blurReplace)
                 }
             }
             .font(.subheadline.bold())
@@ -146,30 +155,55 @@ struct ChowderLiveActivity: Widget {
             
             // Stacked cards for previous intents - keyed by the intent text itself
             ZStack {
-                if intents.isEmpty {
-                    Text(context.attributes.userTask)
-                        .lineLimit(2)
-                        .multilineTextAlignment(.leading)
-                        .foregroundStyle(.blue)
-                    //                    .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(12)
-                        .background(Color.blue.opacity(0.12), in: .rect(cornerRadius: 16, style: .continuous))
-                        .overlay(alignment: .bottomTrailing, content: {
-                            Image(.messageBubble)
-                                .renderingMode(.template)
-                                .offset(y: 10)
-                                .foregroundStyle(.blue.opacity(0.12))
-                        })
-                        .padding(.leading, 48)
-                        .font(.subheadline)
-                        .frame(maxWidth: .infinity, alignment: .trailing)
-                        .transition(.blurReplace)
-                }
+                let isFinished = state.isFinished
                 
-                ForEach(intents, id: \.self) { intent in
-                    let isBehind = intent != state.previousIntent
-                    
-                    IntentCard(text: intent, isBehind: isBehind)
+                if isFinished {
+                    VStack(alignment: .center) {
+                        Image(systemName: "checkmark.circle.fill")
+                            .resizable()
+                            .scaledToFit()
+                            .foregroundStyle(Color.green)
+                            .frame(width: 21)
+                            .background(Color.white, in: .circle)
+                            .compositingGroup()
+                        Text("Your tickets have been booked")
+                            .font(.subheadline.bold())
+                    }
+                    .frame(maxWidth: .infinity)
+                } else {
+                    ZStack {
+                        if intents.isEmpty {
+                            Text(context.attributes.userTask)
+                                .lineLimit(2)
+                                .multilineTextAlignment(.leading)
+                                .foregroundStyle(.blue)
+                                .padding(12)
+                                .background(
+                                    Color.blue.opacity(userTaskOpacity),
+                                    in: .rect(cornerRadius: 16, style: .continuous)
+                                )
+                                .overlay(alignment: .bottomTrailing, content: {
+                                    Image(.messageBubble)
+                                        .renderingMode(.template)
+                                        .offset(y: 10)
+                                        .foregroundStyle(.blue.opacity(userTaskOpacity))
+                                })
+                                .padding(.leading, 48)
+                                .padding(.trailing, 8)
+                                .font(.callout)
+                                .frame(maxWidth: .infinity, alignment: .trailing)
+                                .transition(.blurReplace)
+                        }
+                        
+                        
+                        ForEach(intents, id: \.self) { intent in
+                            let isBehind = intent != state.previousIntent
+                            
+                            IntentCard(text: intent, isBehind: isBehind)
+                        }
+                    }
+                    .compositingGroup()
+                    .transition(.blurReplace)
                 }
             }
             .frame(height: 70)
@@ -179,42 +213,56 @@ struct ChowderLiveActivity: Widget {
             
             // Footer: current intent + timer
             HStack(spacing: 6) {
-                HStack(spacing: 6) {
-                    Image(systemName: "safari")
-                        .symbolVariant(.fill.circle)
-                    
-                    Text(isWaiting ? "Thinking…" : state.currentIntent)
-                        .lineLimit(1)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .multilineTextAlignment(.leading)
+                if state.isFinished {
+                    Text("^[\(state.stepNumber) step](inflect: true)")
+                        .transition(.blurReplace)
+                } else {
+                    HStack(spacing: 6) {
+                        Image(systemName: "safari")
+                            .symbolVariant(.fill.circle)
+                        
+                        Text(isWaiting ? "Thinking…" : state.currentIntent)
+                            .lineLimit(1)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .multilineTextAlignment(.leading)
+                    }
+                    .id(state.currentIntent)
+                    .transition(.blurReplace)
                 }
-                .id(state.currentIntent)
-                .transition(.blurReplace)
                 
                 Spacer()
                 
-                if !isWaiting && !state.isFinished {
-                    Text("00:00")
-                        .opacity(0)
-                        .layoutPriority(1)
-                        .overlay(alignment: .trailing) {
-                            Text(state.intentStartDate, style: .timer)
-                                .contentTransition(.numericText(countsDown: false))
-                                .font(.subheadline.bold())
-                                .monospacedDigit()
-                                .opacity(0.5)
+                Group {
+                    if !isWaiting {
+                        if let endDate = state.intentEndDate {
+                            let interval = Duration.seconds(endDate.timeIntervalSince(state.intentStartDate))
+                            Text("Finished in \(interval.formatted(.time(pattern: .minuteSecond)))")
+                        } else {
+                            Text("00:00")
+                                .opacity(0)
+                                .overlay(alignment: .trailing) {
+                                    Text(state.intentStartDate, style: .timer)
+                                        .contentTransition(.numericText(countsDown: false))
+                                        .opacity(0.5)
+                                }
                         }
+                    }
                 }
+                .font(.footnote.bold())
+                .monospacedDigit()
+                .multilineTextAlignment(.trailing)
+                .layoutPriority(1)
             }
             .padding(.leading, 8)
             .padding(.trailing, 12)
             .font(.footnote.bold())
+            .opacity(isWaiting || state.isFinished ? 0.24 : 1)
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 10)
         .frame(height: 160)
-        .background(isWaiting ? Color.white : Color.black.opacity(0.18))
-        .activityBackgroundTint(Color.white.opacity(isWaiting ? 1 : 0.12))
+        .background(isWaiting || state.isFinished ? Color.black.opacity(0) : Color.black.opacity(0.18))
+        .activityBackgroundTint(systemBackground.opacity(isWaiting || state.isFinished ? 1 : 0.12))
     }
 }
 
@@ -229,6 +277,7 @@ struct IntentCard: View {
             Image(systemName: "checkmark.circle.fill")
                 .resizable()
                 .scaledToFit()
+                .symbolRenderingMode(.hierarchical)
                 .foregroundStyle(.green)
                 .frame(width: 15)
             

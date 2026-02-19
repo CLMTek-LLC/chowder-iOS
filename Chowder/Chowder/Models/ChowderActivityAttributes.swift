@@ -20,12 +20,16 @@ struct ChowderActivityAttributes: ActivityAttributes {
         var secondPreviousIntent: String?
         /// When the current intent started -- used for the live timer.
         var intentStartDate: Date
+        /// When the current intent ended
+        var intentEndDate: Date?
         /// Total step number (completed + current).
         var stepNumber: Int
         /// Formatted cost string (e.g. "$0.49"), nil until first usage event.
         var costTotal: String?
         /// Whether the agent has finished and the activity should dismiss.
-        var isFinished: Bool
+        var isFinished: Bool {
+            intentEndDate != nil
+        }
     }
 }
 
@@ -49,21 +53,20 @@ extension ChowderActivityAttributes.ContentState {
             secondPreviousIntent: "Identifying dependencies",
             intentStartDate: Date(),
             stepNumber: 3,
-            costTotal: "$0.49",
-            isFinished: false
+            costTotal: "$0.49"
         )
     }
 
     static var finished: ChowderActivityAttributes.ContentState {
         ChowderActivityAttributes.ContentState(
             subject: "Train to Margate",
-            currentIntent: "Complete",
-            previousIntent: "Booking confirmed",
-            secondPreviousIntent: nil,
+            currentIntent: "Confirming booking",
+            previousIntent: "Entering passenger details",
+            secondPreviousIntent: "Found the 10:15 departure—best price!",
             intentStartDate: Date(),
+            intentEndDate: Date.now.addingTimeInterval(360),
             stepNumber: 5,
             costTotal: "$1.23",
-            isFinished: true
         )
     }
 
@@ -78,7 +81,6 @@ extension ChowderActivityAttributes.ContentState {
             intentStartDate: Date(),
             stepNumber: 1,
             costTotal: nil,
-            isFinished: false
         )
     }
 
@@ -91,7 +93,6 @@ extension ChowderActivityAttributes.ContentState {
             intentStartDate: Date(),
             stepNumber: 2,
             costTotal: "$0.12",
-            isFinished: false
         )
     }
 
@@ -104,7 +105,6 @@ extension ChowderActivityAttributes.ContentState {
             intentStartDate: Date(),
             stepNumber: 3,
             costTotal: "$0.34",
-            isFinished: false
         )
     }
 
@@ -117,7 +117,6 @@ extension ChowderActivityAttributes.ContentState {
             intentStartDate: Date(),
             stepNumber: 4,
             costTotal: "$0.56",
-            isFinished: false
         )
     }
 
@@ -130,7 +129,6 @@ extension ChowderActivityAttributes.ContentState {
             intentStartDate: Date(),
             stepNumber: 5,
             costTotal: "$0.78",
-            isFinished: false
         )
     }
 }
