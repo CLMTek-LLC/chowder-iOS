@@ -77,7 +77,9 @@
 		D588E0C02F3EFF5200A6D06D /* Exceptions for "Chowder" folder in "ChowderActivityWidgetExtension" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
+				Assets.xcassets,
 				Models/ChowderActivityAttributes.swift,
+				"Preview Assets.xcassets",
 			);
 			target = D588E0A42F3EFEEF00A6D06D /* ChowderActivityWidgetExtension */;
 		};

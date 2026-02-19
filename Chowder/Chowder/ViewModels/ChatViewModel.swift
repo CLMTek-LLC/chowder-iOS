@@ -494,10 +494,8 @@ final class ChatViewModel: ChatServiceDelegate {
             )
         }
 
-        // Update the Live Activity -- thinking steps update the bottom AND shift the intent stack
-        liveActivityBottomText = "Thinking..."
-        liveActivityStepNumber = (currentActivity?.steps.count ?? 0) + 1
-        pushLiveActivityUpdate()
+        // Update the Live Activity on the Lock Screen
+        LiveActivityManager.shared.updateIntent("Thinking...")
     }
 
     func chatServiceDidReceiveToolEvent(name: String, path: String?, args: [String: Any]?) {
@@ -522,10 +520,8 @@ final class ChatViewModel: ChatServiceDelegate {
         )
         log("Activity now has \(currentActivity?.steps.count ?? 0) total steps (\(currentActivity?.completedSteps.count ?? 0) completed)")
 
-        // Update the Live Activity -- tool events only update the bottom row, not the intent stack
-        liveActivityBottomText = label
-        liveActivityStepNumber = (currentActivity?.steps.count ?? 0)
-        pushLiveActivityUpdate()
+        // Update the Live Activity on the Lock Screen
+        LiveActivityManager.shared.updateIntent(label)
     }
 
     // MARK: - Friendly Tool Labels
@@ -836,11 +832,8 @@ final class ChatViewModel: ChatServiceDelegate {
                 ActivityStep(type: .thinking, label: intentLabel, detail: "", toolCategory: .thinking)
             )
 
-            // Update the Live Activity -- thinking steps shift the intent stack AND update bottom
-            shiftThinkingIntent(intentLabel)
-            liveActivityBottomText = intentLabel + "..."
-            liveActivityStepNumber = (currentActivity?.steps.count ?? 0)
-            pushLiveActivityUpdate()
+            // Update the Live Activity on the Lock Screen
+            LiveActivityManager.shared.updateIntent(cleanText + "...")
         } else {
             log("⚠️ Thinking already seen, skipping: \(thinkingId ?? "nil")")
         }
@@ -886,10 +879,8 @@ final class ChatViewModel: ChatServiceDelegate {
             ActivityStep(type: .toolCall, label: intent.label, detail: "", toolCategory: intent.category)
         )
 
-        // Update the Live Activity -- tool events only update the bottom row
-        liveActivityBottomText = intent.label
-        liveActivityStepNumber = (currentActivity?.steps.count ?? 0)
-        pushLiveActivityUpdate()
+        // Update the Live Activity on the Lock Screen
+        LiveActivityManager.shared.updateIntent(intent)
     }
     
     /// Process toolResult items to show completion

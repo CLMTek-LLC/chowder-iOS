@@ -12,19 +12,125 @@ struct ChowderActivityAttributes: ActivityAttributes {
     struct ContentState: Codable, Hashable {
         /// Short subject line summarizing the task (latched from first thinking summary).
         var subject: String?
-        /// The latest intent -- shown ALL CAPS at the bottom left.
+        /// The latest intent -- shown in the footer.
         var currentIntent: String
-        /// The previous intent -- shown with the yellow arrow + "..."
+        /// The previous intent -- shown as the top card.
         var previousIntent: String?
-        /// The 2nd most previous intent -- shown with grey checkmark, fading out.
+        /// The 2nd most previous intent -- shown as the card behind.
         var secondPreviousIntent: String?
         /// When the current intent started -- used for the live timer.
         var intentStartDate: Date
         /// Total step number (completed + current).
         var stepNumber: Int
-        /// Formatted cost string (e.g. "$0.0012"), nil until first usage event.
+        /// Formatted cost string (e.g. "$0.49"), nil until first usage event.
         var costTotal: String?
         /// Whether the agent has finished and the activity should dismiss.
         var isFinished: Bool
+    }
+}
+
+// MARK: - Preview Data
+
+extension ChowderActivityAttributes {
+    static var preview: ChowderActivityAttributes {
+        ChowderActivityAttributes(
+            agentName: "Larry",
+            userTask: "I’ll go skiing next weekend."
+        )
+    }
+}
+
+extension ChowderActivityAttributes.ContentState {
+    static var inProgress: ChowderActivityAttributes.ContentState {
+        ChowderActivityAttributes.ContentState(
+            subject: "Train to Margate",
+            currentIntent: "Searching available trains",
+            previousIntent: "Reading project files",
+            secondPreviousIntent: "Identifying dependencies",
+            intentStartDate: Date(),
+            stepNumber: 3,
+            costTotal: "$0.49",
+            isFinished: false
+        )
+    }
+
+    static var finished: ChowderActivityAttributes.ContentState {
+        ChowderActivityAttributes.ContentState(
+            subject: "Train to Margate",
+            currentIntent: "Complete",
+            previousIntent: "Booking confirmed",
+            secondPreviousIntent: nil,
+            intentStartDate: Date(),
+            stepNumber: 5,
+            costTotal: "$1.23",
+            isFinished: true
+        )
+    }
+
+    // MARK: - Progressive States (for cycling through)
+
+    static var step1: ChowderActivityAttributes.ContentState {
+        ChowderActivityAttributes.ContentState(
+            subject: "Train to Margate",
+            currentIntent: "Searched trains from London to Margate on June 15",
+            previousIntent: nil,
+            secondPreviousIntent: nil,
+            intentStartDate: Date(),
+            stepNumber: 1,
+            costTotal: nil,
+            isFinished: false
+        )
+    }
+
+    static var step2: ChowderActivityAttributes.ContentState {
+        ChowderActivityAttributes.ContentState(
+            subject: "Train to Margate",
+            currentIntent: "Comparing departure times and prices",
+            previousIntent: "Searched trains from London to Margate on June 15",
+            secondPreviousIntent: nil,
+            intentStartDate: Date(),
+            stepNumber: 2,
+            costTotal: "$0.12",
+            isFinished: false
+        )
+    }
+
+    static var step3: ChowderActivityAttributes.ContentState {
+        ChowderActivityAttributes.ContentState(
+            subject: "Train to Margate",
+            currentIntent: "Found the 10:15 departure—best price!",
+            previousIntent: "Compared departure times and prices",
+            secondPreviousIntent: "Searched trains from London to Margate on June 15",
+            intentStartDate: Date(),
+            stepNumber: 3,
+            costTotal: "$0.34",
+            isFinished: false
+        )
+    }
+
+    static var step4: ChowderActivityAttributes.ContentState {
+        ChowderActivityAttributes.ContentState(
+            subject: "Train to Margate",
+            currentIntent: "Entering passenger details",
+            previousIntent: "Found the 10:15 departure—best price!",
+            secondPreviousIntent: "Compared departure times and prices",
+            intentStartDate: Date(),
+            stepNumber: 4,
+            costTotal: "$0.56",
+            isFinished: false
+        )
+    }
+
+    static var step5: ChowderActivityAttributes.ContentState {
+        ChowderActivityAttributes.ContentState(
+            subject: "Train to Margate",
+            currentIntent: "Confirming booking",
+            previousIntent: "Entering passenger details",
+            secondPreviousIntent: "Found the 10:15 departure—best price!",
+            intentStartDate: Date(),
+            stepNumber: 5,
+            costTotal: "$0.78",
+            isFinished: false
+        )
     }
 }
