@@ -27,6 +27,11 @@ struct MessageBubbleView: View {
                         .fill(Color.blue)
                     : nil
             )
+            .contextMenu {
+                Button("Copy") {
+                    UIPasteboard.general.string = message.content
+                }
+            }
 
             if message.role == .assistant {
                 Spacer(minLength: 0)
