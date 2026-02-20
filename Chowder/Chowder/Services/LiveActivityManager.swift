@@ -7,7 +7,13 @@ final class LiveActivityManager: @unchecked Sendable {
     static let shared = LiveActivityManager()
 
     private var currentActivity: Activity<ChowderActivityAttributes>?
-    private var intentStartDate: Date = Date()
+    private var activityStartDate: Date = Date()
+
+    private var pendingContent: ActivityContent<ChowderActivityAttributes.ContentState>?
+    private var debounceTimer: Timer?
+    private let debounceInterval: TimeInterval = 1.0
+    private var lastStepNumber: Int = 0
+    private var lastCostTotal: String?
 
     private init() {}
 
@@ -23,7 +29,9 @@ final class LiveActivityManager: @unchecked Sendable {
             endActivity()
         }
 
-        intentStartDate = Date()
+        activityStartDate = Date()
+        lastStepNumber = 0
+        lastCostTotal = nil
 
         guard ActivityAuthorizationInfo().areActivitiesEnabled else {
             print("⚡ Live Activities not enabled — skipping")
@@ -39,7 +47,7 @@ final class LiveActivityManager: @unchecked Sendable {
             currentIntent: "Thinking...",
             previousIntent: nil,
             secondPreviousIntent: nil,
-            intentStartDate: intentStartDate,
+            intentStartDate: activityStartDate,
             stepNumber: 1,
             costTotal: nil
         )
@@ -70,27 +78,39 @@ final class LiveActivityManager: @unchecked Sendable {
     func update(
         subject: String?,
         currentIntent: String,
+        currentIntentIcon: String? = nil,
         previousIntent: String?,
         secondPreviousIntent: String?,
         stepNumber: Int,
         costTotal: String?,
         isAISubject: Bool = false
     ) {
-        guard let activity = currentActivity else { return }
+        guard currentActivity != nil else { return }
 
-        // Reset timer when intent changes
-        intentStartDate = Date()
+        lastStepNumber = stepNumber
+        lastCostTotal = costTotal
 
         let state = ChowderActivityAttributes.ContentState(
             subject: subject,
             currentIntent: currentIntent,
+            currentIntentIcon: currentIntentIcon,
             previousIntent: previousIntent,
             secondPreviousIntent: secondPreviousIntent,
-            intentStartDate: intentStartDate,
+            intentStartDate: activityStartDate,
             stepNumber: stepNumber,
             costTotal: costTotal
         )
-        let content = ActivityContent(state: state, staleDate: nil)
+        pendingContent = ActivityContent(state: state, staleDate: nil)
+
+        debounceTimer?.invalidate()
+        debounceTimer = Timer.scheduledTimer(withTimeInterval: debounceInterval, repeats: false) { [weak self] _ in
+            self?.flushPendingUpdate()
+        }
+    }
+
+    private func flushPendingUpdate() {
+        guard let activity = currentActivity, let content = pendingContent else { return }
+        pendingContent = nil
 
         Task {
             await activity.update(content)
@@ -116,6 +136,9 @@ final class LiveActivityManager: @unchecked Sendable {
     /// - Parameter completionSummary: Optional completion message to display (e.g. "Your tickets have been booked").
     func endActivity(completionSummary: String? = nil) {
         guard let activity = currentActivity else { return }
+        debounceTimer?.invalidate()
+        debounceTimer = nil
+        pendingContent = nil
         currentActivity = nil
 
         let finalState = ChowderActivityAttributes.ContentState(
@@ -123,10 +146,10 @@ final class LiveActivityManager: @unchecked Sendable {
             currentIntent: "Complete",
             previousIntent: nil,
             secondPreviousIntent: nil,
-            intentStartDate: intentStartDate,
+            intentStartDate: activityStartDate,
             intentEndDate: .now,
-            stepNumber: 0,
-            costTotal: nil
+            stepNumber: lastStepNumber,
+            costTotal: lastCostTotal
         )
         let content = ActivityContent(state: finalState, staleDate: nil)
 

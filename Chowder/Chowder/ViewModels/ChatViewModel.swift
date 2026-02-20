@@ -118,14 +118,44 @@ final class ChatViewModel: ChatServiceDelegate {
     private var liveActivityStepNumber: Int = 1
     /// Subject line for the Live Activity -- latched from first thinking summary.
     private var liveActivitySubject: String?
+    /// SF Symbol name for the current intent's tool category.
+    private var liveActivityCurrentIcon: String?
+    /// Cache of intent -> past-tense conversion so each intent is only converted once.
+    private var pastTenseCache: [String: String] = [:]
 
     /// Shift a new thinking intent into the yellow/grey stack.
     /// Only call this for thinking steps -- NOT tool events.
+    /// The new intent is placed as-is initially, then an async past-tense conversion
+    /// fires and updates the value in place (grey reuses the already-converted yellow).
     private func shiftThinkingIntent(_ newIntent: String) {
         guard newIntent != liveActivityYellowIntent else { return }
+        // Grey gets yellow's value (already converted or mid-conversion)
         liveActivityGreyIntent = liveActivityYellowIntent
-        liveActivityYellowIntent = newIntent
-        // Latch the first thinking intent as the subject
+        // Use cached past tense if available, otherwise set raw and convert async
+        if let cached = pastTenseCache[newIntent] {
+            liveActivityYellowIntent = cached
+        } else {
+            liveActivityYellowIntent = newIntent
+            let intentToConvert = newIntent
+            Task {
+                let pastTense = await TaskSummaryService.shared.convertToPastTense(intentToConvert)
+                await MainActor.run {
+                    if let pastTense {
+                        self.pastTenseCache[intentToConvert] = pastTense
+                        // Only update if this intent is still the current yellow
+                        if self.liveActivityYellowIntent == intentToConvert {
+                            self.liveActivityYellowIntent = pastTense
+                            self.pushLiveActivityUpdate()
+                        }
+                        // Or if it already shifted to grey
+                        if self.liveActivityGreyIntent == intentToConvert {
+                            self.liveActivityGreyIntent = pastTense
+                            self.pushLiveActivityUpdate()
+                        }
+                    }
+                }
+            }
+        }
         if liveActivitySubject == nil {
             liveActivitySubject = newIntent
         }
@@ -136,6 +166,7 @@ final class ChatViewModel: ChatServiceDelegate {
         LiveActivityManager.shared.update(
             subject: liveActivitySubject,
             currentIntent: liveActivityBottomText,
+            currentIntentIcon: liveActivityCurrentIcon,
             previousIntent: liveActivityYellowIntent,
             secondPreviousIntent: liveActivityGreyIntent,
             stepNumber: liveActivityStepNumber,
@@ -147,12 +178,14 @@ final class ChatViewModel: ChatServiceDelegate {
     /// Reset Live Activity tracking state for a new run.
     private func resetLiveActivityState() {
         liveActivityBottomText = "Thinking..."
-        liveActivityYellowIntent = "Thinking..."
-        liveActivityGreyIntent = "Message received"
+        liveActivityYellowIntent = nil
+        liveActivityGreyIntent = nil
         liveActivityCostAccumulator = 0
         liveActivityCost = nil
         liveActivityStepNumber = 1
         liveActivitySubject = nil
+        liveActivityCurrentIcon = nil
+        pastTenseCache.removeAll()
     }
 
     /// Generate a completion summary message from the task title.
@@ -856,8 +889,12 @@ final class ChatViewModel: ChatServiceDelegate {
                 ActivityStep(type: .thinking, label: intentLabel, detail: "", toolCategory: .thinking)
             )
 
-            // Update the Live Activity on the Lock Screen
-            LiveActivityManager.shared.updateIntent(cleanText + "...")
+            // Update the Live Activity -- thinking steps shift the intent stack AND update bottom
+            shiftThinkingIntent(intentLabel)
+            liveActivityBottomText = intentLabel + "..."
+            liveActivityCurrentIcon = ToolCategory.thinking.iconName
+            liveActivityStepNumber = (currentActivity?.steps.count ?? 0)
+            pushLiveActivityUpdate()
         } else {
             log("⚠️ Thinking already seen, skipping: \(thinkingId ?? "nil")")
         }
@@ -903,8 +940,11 @@ final class ChatViewModel: ChatServiceDelegate {
             ActivityStep(type: .toolCall, label: intent.label, detail: "", toolCategory: intent.category)
         )
 
-        // Update the Live Activity on the Lock Screen
-        LiveActivityManager.shared.updateIntent(intent.label)
+        // Update the Live Activity -- tool events only update the bottom row
+        liveActivityBottomText = intent.label
+        liveActivityCurrentIcon = intent.category.iconName
+        liveActivityStepNumber = (currentActivity?.steps.count ?? 0)
+        pushLiveActivityUpdate()
     }
     
     /// Process toolResult items to show completion

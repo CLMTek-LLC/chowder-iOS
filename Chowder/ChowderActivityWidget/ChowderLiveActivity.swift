@@ -83,7 +83,7 @@ struct ChowderLiveActivity: Widget {
         @Environment(\.colorScheme) var colorScheme
         
         
-        let primaryForeground: Color = colorScheme == .dark ? .white : Color(uiColor: .init(red: 47/255, green: 59/255, blue: 84/255, alpha: 1))
+        let primaryForeground: Color = .primary
         let systemBackground: Color = Color(uiColor: .systemBackground)
         let userTaskOpacity: CGFloat = colorScheme == .dark ? 0.24 : 0.12
         
@@ -92,9 +92,7 @@ struct ChowderLiveActivity: Widget {
             HStack(spacing: 10) {
                 
                 HStack {
-                    Image(.larry)
-                        .resizable()
-                        .scaledToFit()
+                    agentAvatar()
                         .frame(width: 21, height: 21)
                         .clipShape(.circle)
                         .overlay {
@@ -217,9 +215,9 @@ struct ChowderLiveActivity: Widget {
                     Text("^[\(state.stepNumber) step](inflect: true)")
                         .transition(.blurReplace)
                 } else {
-                    HStack(spacing: 6) {
-                        Image(systemName: "safari")
-                            .symbolVariant(.fill.circle)
+                    HStack(spacing: 2) {
+                        Text(Image(systemName: state.currentIntentIcon ?? "arrow.turn.down.right"))
+                            .frame(width: 24, height: 18)
                         
                         Text(isWaiting ? "Thinking…" : state.currentIntent)
                             .lineLimit(1)
@@ -253,7 +251,8 @@ struct ChowderLiveActivity: Widget {
                 .multilineTextAlignment(.trailing)
                 .layoutPriority(1)
             }
-            .padding(.leading, 8)
+            .foregroundStyle(primaryForeground)
+            .padding(.leading, 4)
             .padding(.trailing, 12)
             .font(.footnote.bold())
             .opacity(isWaiting || state.isFinished ? 0.24 : 1)
@@ -261,8 +260,21 @@ struct ChowderLiveActivity: Widget {
         .padding(.horizontal, 8)
         .padding(.vertical, 10)
         .frame(height: 160)
-        .background(isWaiting || state.isFinished ? Color.black.opacity(0) : Color.black.opacity(0.18))
-        .activityBackgroundTint(systemBackground.opacity(isWaiting || state.isFinished ? 1 : 0.12))
+//        .background(isWaiting || state.isFinished ? Color.black.opacity(0) : Color.black.opacity(0.18))
+        .activityBackgroundTint(isWaiting || state.isFinished ? systemBackground : .clear)
+    }
+    
+    @ViewBuilder
+    private func agentAvatar() -> some View {
+        if false, let uiImage = SharedStorage.loadAvatarImage() {
+            Image(uiImage: uiImage)
+                .resizable()
+                .scaledToFill()
+        } else {
+            Image(.oddjob)
+                .resizable()
+                .scaledToFit()
+        }
     }
 }
 

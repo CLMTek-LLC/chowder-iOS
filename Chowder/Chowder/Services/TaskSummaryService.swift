@@ -54,6 +54,54 @@ actor TaskSummaryService {
         }
     }
 
+    /// Convert an intent string from present/progressive tense to past tense.
+    /// e.g. "Searching for files..." -> "Searched for files"
+    /// Returns nil if Foundation Models is unavailable or generation fails.
+    func convertToPastTense(_ intent: String) async -> String? {
+        let cleaned = intent.trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: "...", with: "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleaned.isEmpty else { return nil }
+
+        let availability = SystemLanguageModel.default.availability
+        guard availability == .available else { return nil }
+
+        let session = LanguageModelSession(model: .init(useCase: .general, guardrails: .permissiveContentTransformations))
+
+        let prompt = """
+        Convert this action description to past tense. Keep the same level of detail and specificity.
+
+        Input: "\(cleaned)"
+
+        Rules:
+        - Convert progressive/present tense to simple past tense
+        - Keep proper nouns, filenames, and quoted strings unchanged
+        - Keep it the same length or shorter
+        - Do not add punctuation at the end
+
+        Examples:
+        - "Searching for files" → "Searched for files"
+        - "Reading config.json" → "Read config.json"
+        - "Browsing api.example.com" → "Browsed api.example.com"
+        - "Running a command" → "Ran a command"
+        - "Comparing departure times and prices" → "Compared departure times and prices"
+        - "Entering passenger details" → "Entered passenger details"
+        - "Writing helpers.swift" → "Wrote helpers.swift"
+        - "Using browser" → "Used browser"
+        - "Fetching data" → "Fetched data"
+        - "Thinking" → "Thought about the task"
+
+        Only output the converted text, nothing else.
+        """
+
+        do {
+            let response = try await session.respond(to: prompt)
+            return response.content.trimmingCharacters(in: .whitespacesAndNewlines)
+        } catch {
+            return nil
+        }
+    }
+
     /// Generate a completion message from a task title.
     /// Transforms an imperative title like "Book train tickets" into a past-tense completion
     /// message like "Your tickets have been booked".

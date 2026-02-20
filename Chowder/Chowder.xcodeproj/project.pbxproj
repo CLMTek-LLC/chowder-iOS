@@ -79,7 +79,7 @@
 			membershipExceptions = (
 				Assets.xcassets,
 				Models/ChowderActivityAttributes.swift,
-				"Preview Assets.xcassets",
+				Models/SharedStorage.swift,
 			);
 			target = D588E0A42F3EFEEF00A6D06D /* ChowderActivityWidgetExtension */;
 		};
@@ -700,6 +700,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				ASSETCATALOG_COMPILER_WIDGET_BACKGROUND_COLOR_NAME = WidgetBackground;
+				CODE_SIGN_ENTITLEMENTS = ChowderActivityWidget/ChowderActivityWidget.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = 433N42F295;
@@ -735,6 +736,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				ASSETCATALOG_COMPILER_WIDGET_BACKGROUND_COLOR_NAME = WidgetBackground;
+				CODE_SIGN_ENTITLEMENTS = ChowderActivityWidget/ChowderActivityWidget.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = 433N42F295;

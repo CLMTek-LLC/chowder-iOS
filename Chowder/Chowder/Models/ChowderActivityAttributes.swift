@@ -14,6 +14,8 @@ struct ChowderActivityAttributes: ActivityAttributes {
         var subject: String?
         /// The latest intent -- shown in the footer.
         var currentIntent: String
+        /// SF Symbol name for the current intent's tool category.
+        var currentIntentIcon: String?
         /// The previous intent -- shown as the top card.
         var previousIntent: String?
         /// The 2nd most previous intent -- shown as the card behind.
