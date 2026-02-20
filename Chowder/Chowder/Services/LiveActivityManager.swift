@@ -7,54 +7,50 @@ final class LiveActivityManager: @unchecked Sendable {
     static let shared = LiveActivityManager()
 
     private var currentActivity: Activity<ChowderActivityAttributes>?
-    /// When the current intent started (reset when intent text changes).
-    private var intentStartDate: Date = Date()
-    /// Last known current intent (tracked to know when it changes for the timer).
-    private var lastIntentText: String = ""
-    /// Last known state for use in endActivity.
-    private var lastState: ChowderActivityAttributes.ContentState?
-    /// Latched subject -- set from the first thinking summary, never overwritten.
-    private var latchedSubject: String?
+    private var activityStartDate: Date = Date()
+
+    private var pendingContent: ActivityContent<ChowderActivityAttributes.ContentState>?
+    private var debounceTimer: Timer?
+    private let debounceInterval: TimeInterval = 1.0
+    private var lastStepNumber: Int = 0
+    private var lastCostTotal: String?
 
     private init() {}
 
     // MARK: - Public API
 
     /// Start a new Live Activity when the user sends a message.
-    func startActivity(agentName: String, userTask: String) {
+    /// - Parameters:
+    ///   - agentName: The bot/agent display name.
+    ///   - userTask: The message the user sent (truncated for display).
+    ///   - subject: Optional AI-generated subject to display immediately.
+    func startActivity(agentName: String, userTask: String, subject: String? = nil) {
         if currentActivity != nil {
             endActivity()
         }
 
-        intentStartDate = Date()
-        lastIntentText = ""
-        lastState = nil
-        latchedSubject = nil
+        activityStartDate = Date()
+        lastStepNumber = 0
+        lastCostTotal = nil
 
         guard ActivityAuthorizationInfo().areActivitiesEnabled else {
             print("⚡ Live Activities not enabled — skipping")
             return
         }
 
-        let truncatedTask = userTask.count > 60
-            ? String(userTask.prefix(57)) + "..."
-            : userTask
-
         let attributes = ChowderActivityAttributes(
             agentName: agentName,
-            userTask: truncatedTask
+            userTask: userTask
         )
         let initialState = ChowderActivityAttributes.ContentState(
-            subject: nil,
+            subject: subject,
             currentIntent: "Thinking...",
-            previousIntent: "Thinking...",
-            secondPreviousIntent: "Message received",
-            intentStartDate: Date(),
+            previousIntent: nil,
+            secondPreviousIntent: nil,
+            intentStartDate: activityStartDate,
             stepNumber: 1,
-            costTotal: nil,
-            isFinished: false
+            costTotal: nil
         )
-        lastState = initialState
         let content = ActivityContent(state: initialState, staleDate: nil)
 
         do {
@@ -69,64 +65,92 @@ final class LiveActivityManager: @unchecked Sendable {
         }
     }
 
-    /// Update the Live Activity with new intent data.
+    /// Update the Live Activity with full state from the caller.
+    /// This is the primary update method used by ChatViewModel which manages its own state.
+    /// - Parameters:
+    ///   - subject: Subject line for the activity (AI-generated or latched from first intent).
+    ///   - currentIntent: The current step label shown at the bottom.
+    ///   - previousIntent: The most recent completed intent (yellow arrow).
+    ///   - secondPreviousIntent: The 2nd most recent intent (grey, fading out).
+    ///   - stepNumber: The total step count.
+    ///   - costTotal: Formatted cost string (e.g. "$0.049").
+    ///   - isAISubject: Whether the subject was AI-generated (for potential future use).
     func update(
         subject: String?,
         currentIntent: String,
+        currentIntentIcon: String? = nil,
         previousIntent: String?,
         secondPreviousIntent: String?,
         stepNumber: Int,
-        costTotal: String?
+        costTotal: String?,
+        isAISubject: Bool = false
     ) {
-        guard let _ = currentActivity else { return }
+        guard currentActivity != nil else { return }
 
-        // Latch subject on first non-nil value
-        if latchedSubject == nil, let subject {
-            latchedSubject = subject
-        }
-
-        // Reset the timer when the intent text changes
-        if currentIntent != lastIntentText {
-            lastIntentText = currentIntent
-            intentStartDate = Date()
-        }
+        lastStepNumber = stepNumber
+        lastCostTotal = costTotal
 
         let state = ChowderActivityAttributes.ContentState(
-            subject: latchedSubject,
+            subject: subject,
             currentIntent: currentIntent,
+            currentIntentIcon: currentIntentIcon,
             previousIntent: previousIntent,
             secondPreviousIntent: secondPreviousIntent,
-            intentStartDate: intentStartDate,
+            intentStartDate: activityStartDate,
             stepNumber: stepNumber,
-            costTotal: costTotal,
-            isFinished: false
+            costTotal: costTotal
         )
-        lastState = state
-        let content = ActivityContent(state: state, staleDate: nil)
+        pendingContent = ActivityContent(state: state, staleDate: nil)
 
-        Task {
-            await currentActivity?.update(content)
+        debounceTimer?.invalidate()
+        debounceTimer = Timer.scheduledTimer(withTimeInterval: debounceInterval, repeats: false) { [weak self] _ in
+            self?.flushPendingUpdate()
         }
     }
 
+    private func flushPendingUpdate() {
+        guard let activity = currentActivity, let content = pendingContent else { return }
+        pendingContent = nil
+
+        Task {
+            await activity.update(content)
+        }
+    }
+
+    /// Convenience method to update with just a new intent string.
+    /// Shifts intents internally - use `update(...)` for full control.
+    func updateIntent(_ intent: String) {
+        guard currentActivity != nil else { return }
+        // This is a simplified update - ChatViewModel manages full state
+        update(
+            subject: nil,
+            currentIntent: intent,
+            previousIntent: nil,
+            secondPreviousIntent: nil,
+            stepNumber: 1,
+            costTotal: nil
+        )
+    }
+
     /// End the Live Activity. Shows a brief "Done" state before dismissing.
-    func endActivity() {
+    /// - Parameter completionSummary: Optional completion message to display (e.g. "Your tickets have been booked").
+    func endActivity(completionSummary: String? = nil) {
         guard let activity = currentActivity else { return }
+        debounceTimer?.invalidate()
+        debounceTimer = nil
+        pendingContent = nil
         currentActivity = nil
 
         let finalState = ChowderActivityAttributes.ContentState(
-            subject: latchedSubject,
-            currentIntent: "Done",
-            previousIntent: lastState?.currentIntent,
-            secondPreviousIntent: lastState?.previousIntent,
-            intentStartDate: lastState?.intentStartDate ?? Date(),
-            stepNumber: lastState?.stepNumber ?? 0,
-            costTotal: lastState?.costTotal,
-            isFinished: true
+            subject: completionSummary,
+            currentIntent: "Complete",
+            previousIntent: nil,
+            secondPreviousIntent: nil,
+            intentStartDate: activityStartDate,
+            intentEndDate: .now,
+            stepNumber: lastStepNumber,
+            costTotal: lastCostTotal
         )
-        lastState = nil
-        lastIntentText = ""
-        latchedSubject = nil
         let content = ActivityContent(state: finalState, staleDate: nil)
 
         Task {

@@ -54,6 +54,7 @@ enum LocalStorage {
         } catch {
             print("[LocalStorage] Failed to save avatar: \(error)")
         }
+        SharedStorage.saveAvatar(image)
     }
 
     static func loadAvatar() -> UIImage? {
@@ -63,6 +64,7 @@ enum LocalStorage {
 
     static func deleteAvatar() {
         try? FileManager.default.removeItem(at: avatarURL)
+        SharedStorage.deleteAvatar()
     }
 
     // MARK: - User Context (legacy local-only)

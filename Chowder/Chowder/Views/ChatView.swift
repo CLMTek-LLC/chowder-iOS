@@ -4,6 +4,7 @@ struct ChatView: View {
     @State private var viewModel = ChatViewModel()
     @State private var isAtBottom = true
     @FocusState private var isInputFocused: Bool
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         VStack(spacing: 0) {
@@ -133,6 +134,7 @@ struct ChatView: View {
             ChatHeaderView(
                 botName: viewModel.botName,
                 isOnline: viewModel.isConnected,
+                taskSummary: viewModel.currentTaskSummary,
                 onSettingsTapped: { viewModel.showSettings = true },
                 onDebugTapped: { viewModel.showDebugLog = true }
             )
@@ -140,6 +142,11 @@ struct ChatView: View {
         .navigationBarHidden(true)
         .onAppear {
             viewModel.connect()
+        }
+        .onChange(of: scenePhase) { oldPhase, newPhase in
+            if oldPhase == .background && newPhase == .active {
+                viewModel.reconnect()
+            }
         }
         .sheet(isPresented: $viewModel.showSettings) {
             SettingsView(

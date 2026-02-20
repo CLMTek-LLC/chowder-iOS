@@ -3,6 +3,7 @@ import SwiftUI
 struct ChatHeaderView: View {
     let botName: String
     let isOnline: Bool
+    var taskSummary: String?
     var onSettingsTapped: (() -> Void)?
     var onDebugTapped: (() -> Void)?
 
@@ -42,9 +43,21 @@ struct ChatHeaderView: View {
                                 .font(.system(size: 16, weight: .semibold))
                                 .foregroundStyle(.primary)
 
-                            Text(isOnline ? "Online" : "Offline")
-                                .font(.system(size: 13, weight: .regular))
-                                .foregroundStyle(.gray)
+                            HStack(spacing: 4) {
+                                Text(isOnline ? "Online" : "Offline")
+                                    .font(.system(size: 13, weight: .regular))
+                                    .foregroundStyle(.gray)
+                                
+                                if let summary = taskSummary {
+                                    Text("·")
+                                        .font(.system(size: 13, weight: .regular))
+                                        .foregroundStyle(.gray)
+                                    Text(summary)
+                                        .font(.system(size: 13, weight: .medium))
+                                        .foregroundStyle(.secondary)
+                                        .lineLimit(1)
+                                }
+                            }
                         }
                     }
                 }

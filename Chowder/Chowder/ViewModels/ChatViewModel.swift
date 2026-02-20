@@ -56,6 +56,11 @@ final class ChatViewModel: ChatServiceDelegate {
     /// Controls presentation of the activity detail card.
     var showActivityCard: Bool = false
 
+    /// The current task summary title (AI-generated), shown in the chat header during active tasks.
+    var currentTaskSummary: String? {
+        liveActivitySubject
+    }
+
     private var shimmerStartTime: Date?
 
     /// Light haptic fired once when the assistant's response starts streaming.
@@ -113,40 +118,86 @@ final class ChatViewModel: ChatServiceDelegate {
     private var liveActivityStepNumber: Int = 1
     /// Subject line for the Live Activity -- latched from first thinking summary.
     private var liveActivitySubject: String?
+    /// SF Symbol name for the current intent's tool category.
+    private var liveActivityCurrentIcon: String?
+    /// Cache of intent -> past-tense conversion so each intent is only converted once.
+    private var pastTenseCache: [String: String] = [:]
 
     /// Shift a new thinking intent into the yellow/grey stack.
     /// Only call this for thinking steps -- NOT tool events.
+    /// The new intent is placed as-is initially, then an async past-tense conversion
+    /// fires and updates the value in place (grey reuses the already-converted yellow).
     private func shiftThinkingIntent(_ newIntent: String) {
         guard newIntent != liveActivityYellowIntent else { return }
+        // Grey gets yellow's value (already converted or mid-conversion)
         liveActivityGreyIntent = liveActivityYellowIntent
-        liveActivityYellowIntent = newIntent
-        // Latch the first thinking intent as the subject
+        // Use cached past tense if available, otherwise set raw and convert async
+        if let cached = pastTenseCache[newIntent] {
+            liveActivityYellowIntent = cached
+        } else {
+            liveActivityYellowIntent = newIntent
+            let intentToConvert = newIntent
+            Task {
+                let pastTense = await TaskSummaryService.shared.convertToPastTense(intentToConvert)
+                await MainActor.run {
+                    if let pastTense {
+                        self.pastTenseCache[intentToConvert] = pastTense
+                        // Only update if this intent is still the current yellow
+                        if self.liveActivityYellowIntent == intentToConvert {
+                            self.liveActivityYellowIntent = pastTense
+                            self.pushLiveActivityUpdate()
+                        }
+                        // Or if it already shifted to grey
+                        if self.liveActivityGreyIntent == intentToConvert {
+                            self.liveActivityGreyIntent = pastTense
+                            self.pushLiveActivityUpdate()
+                        }
+                    }
+                }
+            }
+        }
         if liveActivitySubject == nil {
             liveActivitySubject = newIntent
         }
     }
 
     /// Push current tracking state to the Live Activity.
-    private func pushLiveActivityUpdate() {
+    private func pushLiveActivityUpdate(isAISubject: Bool = false) {
         LiveActivityManager.shared.update(
             subject: liveActivitySubject,
             currentIntent: liveActivityBottomText,
+            currentIntentIcon: liveActivityCurrentIcon,
             previousIntent: liveActivityYellowIntent,
             secondPreviousIntent: liveActivityGreyIntent,
             stepNumber: liveActivityStepNumber,
-            costTotal: liveActivityCost
+            costTotal: liveActivityCost,
+            isAISubject: isAISubject
         )
     }
 
     /// Reset Live Activity tracking state for a new run.
     private func resetLiveActivityState() {
         liveActivityBottomText = "Thinking..."
-        liveActivityYellowIntent = "Thinking..."
-        liveActivityGreyIntent = "Message received"
+        liveActivityYellowIntent = nil
+        liveActivityGreyIntent = nil
         liveActivityCostAccumulator = 0
         liveActivityCost = nil
         liveActivityStepNumber = 1
         liveActivitySubject = nil
+        liveActivityCurrentIcon = nil
+        pastTenseCache.removeAll()
+    }
+
+    /// Generate a completion summary message from the task title.
+    /// Returns nil if no task title is available or generation fails.
+    private func generateCompletionSummary(from taskTitle: String?) async -> String? {
+        guard let taskTitle = taskTitle, !taskTitle.isEmpty else {
+            log("📝 No task title for completion summary")
+            return nil
+        }
+        let summary = await TaskSummaryService.shared.generateCompletionMessage(for: taskTitle)
+        log("📝 Completion summary: \(summary ?? "nil")")
+        return summary
     }
 
     // MARK: - Buffered Debug Logging
@@ -259,8 +310,26 @@ final class ChatViewModel: ChatServiceDelegate {
 
         LocalStorage.saveMessages(messages)
 
-        // Start the Lock Screen Live Activity
-        LiveActivityManager.shared.startActivity(agentName: botName, userTask: text)
+        // Start the Live Activity immediately (subject will be updated when ready)
+        let agentName = botName
+        LiveActivityManager.shared.startActivity(agentName: agentName, userTask: text, subject: nil)
+
+        // Generate AI summary for every message sent
+        // Include up to the last 5 user messages to identify the overall task
+        let recentUserMessages = Array(messages
+            .filter { $0.role == .user }
+            .suffix(5)
+            .map { $0.content })
+        log("📝 Generating summary for \(recentUserMessages.count) messages: \(recentUserMessages)")
+        Task {
+            let summary = await TaskSummaryService.shared.generateTitle(for: recentUserMessages)
+            await MainActor.run {
+                self.log("📝 Summary result: \(summary ?? "nil")")
+                self.liveActivitySubject = summary
+                // Update the Live Activity with the generated subject
+                self.pushLiveActivityUpdate(isAISubject: true)
+            }
+        }
 
         chatService?.send(text: text)
         log("chatService.send() called")
@@ -313,7 +382,13 @@ final class ChatViewModel: ChatServiceDelegate {
                 currentActivity = nil
                 shimmerStartTime = nil
                 // End the Lock Screen Live Activity now that the answer is streaming
-                LiveActivityManager.shared.endActivity()
+                let taskTitle = liveActivitySubject
+                Task {
+                    let completionSummary = await generateCompletionSummary(from: taskTitle)
+                    await MainActor.run {
+                        LiveActivityManager.shared.endActivity(completionSummary: completionSummary)
+                    }
+                }
                 log("Cleared activity on first delta")
             }
         }
@@ -341,8 +416,14 @@ final class ChatViewModel: ChatServiceDelegate {
             log("Preserved activity with \(activity.steps.count) steps")
         }
         
-        // End the Lock Screen Live Activity
-        LiveActivityManager.shared.endActivity()
+        // End the Lock Screen Live Activity with completion summary
+        let taskTitle = liveActivitySubject
+        Task {
+            let completionSummary = await generateCompletionSummary(from: taskTitle)
+            await MainActor.run {
+                LiveActivityManager.shared.endActivity(completionSummary: completionSummary)
+            }
+        }
 
         // Clear current activity to prevent late history items from appearing
         currentActivity = nil
@@ -470,10 +551,8 @@ final class ChatViewModel: ChatServiceDelegate {
             )
         }
 
-        // Update the Live Activity -- thinking steps update the bottom AND shift the intent stack
-        liveActivityBottomText = "Thinking..."
-        liveActivityStepNumber = (currentActivity?.steps.count ?? 0) + 1
-        pushLiveActivityUpdate()
+        // Update the Live Activity on the Lock Screen
+        LiveActivityManager.shared.updateIntent("Thinking...")
     }
 
     func chatServiceDidReceiveToolEvent(name: String, path: String?, args: [String: Any]?) {
@@ -498,10 +577,8 @@ final class ChatViewModel: ChatServiceDelegate {
         )
         log("Activity now has \(currentActivity?.steps.count ?? 0) total steps (\(currentActivity?.completedSteps.count ?? 0) completed)")
 
-        // Update the Live Activity -- tool events only update the bottom row, not the intent stack
-        liveActivityBottomText = label
-        liveActivityStepNumber = (currentActivity?.steps.count ?? 0)
-        pushLiveActivityUpdate()
+        // Update the Live Activity on the Lock Screen
+        LiveActivityManager.shared.updateIntent(label)
     }
 
     // MARK: - Friendly Tool Labels
@@ -815,6 +892,7 @@ final class ChatViewModel: ChatServiceDelegate {
             // Update the Live Activity -- thinking steps shift the intent stack AND update bottom
             shiftThinkingIntent(intentLabel)
             liveActivityBottomText = intentLabel + "..."
+            liveActivityCurrentIcon = ToolCategory.thinking.iconName
             liveActivityStepNumber = (currentActivity?.steps.count ?? 0)
             pushLiveActivityUpdate()
         } else {
@@ -864,6 +942,7 @@ final class ChatViewModel: ChatServiceDelegate {
 
         // Update the Live Activity -- tool events only update the bottom row
         liveActivityBottomText = intent.label
+        liveActivityCurrentIcon = intent.category.iconName
         liveActivityStepNumber = (currentActivity?.steps.count ?? 0)
         pushLiveActivityUpdate()
     }

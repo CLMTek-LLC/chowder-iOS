@@ -16,30 +16,29 @@ struct ChowderLiveActivity: Widget {
                 }
                 DynamicIslandExpandedRegion(.center) {
                     VStack(alignment: .leading, spacing: 4) {
-                        Text(context.attributes.userTask)
-                            .font(.system(size: 15, weight: .medium))
-                            .lineLimit(1)
-                        if !context.state.isFinished {
-                            Text(context.state.currentIntent)
-                                .font(.system(size: 13))
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1)
-                        }
+                        Text(context.attributes.agentName)
+                            .font(.headline)
+                        Text(context.state.currentIntent)
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(2)
                     }
                 }
                 DynamicIslandExpandedRegion(.trailing) {
-                    Text("Step \(context.state.stepNumber)")
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(.secondary)
+                    if !context.state.isFinished {
+                        Text("Step \(context.state.stepNumber)")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                 }
                 DynamicIslandExpandedRegion(.bottom) {
                     if let prev = context.state.previousIntent, !context.state.isFinished {
-                        HStack(spacing: 4) {
-                            Image(systemName: "arrow.turn.down.right")
-                                .font(.system(size: 9, weight: .bold))
-                                .foregroundStyle(.yellow)
+                        HStack(spacing: 6) {
+                            Image(systemName: "checkmark")
+                                .font(.system(size: 8, weight: .bold))
+                                .foregroundStyle(.green)
                             Text(prev)
-                                .font(.system(size: 11))
+                                .font(.caption2)
                                 .foregroundStyle(.secondary)
                                 .lineLimit(1)
                         }
@@ -67,126 +66,295 @@ struct ChowderLiveActivity: Widget {
             }
         }
     }
-
+    
     // MARK: - Lock Screen Banner
-
+    
     @ViewBuilder
     private func lockScreenBanner(context: ActivityViewContext<ChowderActivityAttributes>) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            // ── Row 1: Header (OpenClaw > task + intent/timer) + Cost ──
-            HStack(alignment: .top) {
-                VStack(alignment: .leading, spacing: 6) {
-                    // "OpenClaw > user task"
-                    HStack(spacing: 4) {
-                        Text("OpenClaw")
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundStyle(.white.opacity(0.6))
-                        Image(systemName: "arrow.forward")
-                            .font(.system(size: 8, weight: .bold))
-                            .foregroundStyle(.white.opacity(0.4))
-                        Text(context.state.subject ?? context.attributes.userTask)
-                            .font(.system(size: 12, weight: .regular))
-                            .foregroundStyle(.white)
-                            .lineLimit(1)
-                    }
-
-                    // Current intent ALL CAPS + timer (or "DONE" when finished)
-                    if context.state.isFinished {
-                        Text("DONE")
-                            .font(.system(size: 12, weight: .medium, design: .monospaced))
-                            .foregroundStyle(.white.opacity(0.5))
-                    } else {
-                        HStack(spacing: 4) {
-                            Image(systemName: "arrow.turn.down.right")
-                                .font(.system(size: 10, weight: .bold))
-                                .foregroundStyle(Color(red: 247/255, green: 90/255, blue: 77/255))
-
-                            Text(context.state.currentIntent)
-                                .font(.system(size: 12, weight: .medium, design: .monospaced))
-                                .foregroundStyle(.white.opacity(0.5))
-                                .textCase(.uppercase)
-                                .lineLimit(1)
-                                .contentTransition(.numericText())
-
-                            Text(
-                                timerInterval: context.state.intentStartDate...Date.now.addingTimeInterval(3600),
-                                countsDown: false
-                            )
-                            .font(.system(size: 12, weight: .medium, design: .monospaced))
-                            .foregroundStyle(.white.opacity(0.5))
-                            .frame(width: 56, alignment: .leading)
-                        }
-                    }
-                }
-
-                Spacer()
-
-                if let cost = context.state.costTotal {
-                    Text(cost)
-                        .font(.system(size: 14, weight: .medium, design: .monospaced))
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 5)
-                        .background(
-                            Capsule()
-                                .fill(Color(red: 255/255, green: 80/255, blue: 65/255))
-                        )
-                }
-            }
-
-            Spacer()
-
-            // ── Row 2: Previous intent (large, wraps to 2 lines) ──
-            Group {
-                if let prev = context.state.previousIntent, !context.state.isFinished {
-                    Text(prev + "...")
-                        .font(.system(size: 26, weight: .medium))
-                        .foregroundStyle(.white)
-                        .lineSpacing(-4)
-                        .lineLimit(2)
-                        .mask(ShimmerMask())
-                        .transition(.push(from: .bottom))
-                } else if context.state.isFinished {
-                    HStack(spacing: 8) {
-                        ZStack {
+        let state = context.state
+        
+        // Collect unique intents (filter out empty strings and duplicates)
+        let intents: [String] = [state.secondPreviousIntent, state.previousIntent]
+            .compactMap { $0 }
+            .filter { !$0.isEmpty }
+        
+        let isWaiting = intents.isEmpty
+        
+        @Environment(\.colorScheme) var colorScheme
+        
+        
+        let primaryForeground: Color = .primary
+        let systemBackground: Color = Color(uiColor: .systemBackground)
+        let userTaskOpacity: CGFloat = colorScheme == .dark ? 0.24 : 0.12
+        
+        VStack(alignment: .leading, spacing: 4) {
+            // Header: task + cost badge
+            HStack(spacing: 10) {
+                
+                HStack {
+                    agentAvatar()
+                        .frame(width: 21, height: 21)
+                        .clipShape(.circle)
+                        .overlay {
                             Circle()
-                                .fill(Color.green)
-                                .frame(width: 28, height: 28)
-                            Image(systemName: "checkmark")
-                                .font(.system(size: 14, weight: .bold))
-                                .foregroundStyle(.white)
+                                .stroke(primaryForeground.opacity(0.12))
                         }
-                        .transition(.scale.combined(with: .opacity))
-                        Text("Task Complete")
-                            .font(.system(size: 26, weight: .medium))
-                            .foregroundStyle(.white)
+                    
+                    Group {
+                        if intents.isEmpty || state.isFinished {
+                            Text(context.attributes.agentName)
+                        } else {
+                            Text(state.subject ?? "Figuring it out")
+                                .id(state.subject)
+                        }
                     }
+                    .font(.callout.bold())
+                    .foregroundStyle(primaryForeground.opacity(0.72))
+                    .lineLimit(1)
+                    .transition(.blurReplace)
+                }
+                
+                
+                
+                Spacer()
+                
+                
+                if let cost = state.costTotal {
+                    let alert = !cost.contains("$0")
+                    
+                    Text(cost)
+                        .font(.subheadline)
+                        .fontWeight(.regular)
+                        .padding(.vertical, 4)
+                        .padding(.horizontal, 8)
+                        .overlay {
+                            Capsule()
+                                .stroke(primaryForeground.opacity(alert ? 0.06 : 0.12))
+                        }
+                        .background(primaryForeground.opacity(alert ? 0.12 : 0), in: .capsule)
+                        .monospacedDigit()
+                } else {
+                    HStack(spacing: 5) {
+                        Image(systemName: "circle.fill")
+                            .resizable()
+                            .foregroundStyle(.green)
+                            .frame(width: 5, height: 5)
+                            .symbolEffect(.pulse)
+                        
+                        Text("OpenClaw")
+                            .foregroundStyle(.secondary)
+                    }
+                    .transition(.blurReplace)
                 }
             }
-            .frame(minHeight: 58, alignment: .bottomLeading)
+            .font(.subheadline.bold())
+            .frame(height: 28)
+            .padding(.horizontal, 6)
+            
+            // Stacked cards for previous intents - keyed by the intent text itself
+            ZStack {
+                let isFinished = state.isFinished
+                
+                if isFinished {
+                    VStack(alignment: .center) {
+                        Image(systemName: "checkmark.circle.fill")
+                            .resizable()
+                            .scaledToFit()
+                            .foregroundStyle(Color.green)
+                            .frame(width: 21)
+                            .background(Color.white, in: .circle)
+                            .compositingGroup()
+                        Text(state.subject ?? "Task complete")
+                            .font(.subheadline.bold())
+                    }
+                    .frame(maxWidth: .infinity)
+                } else {
+                    ZStack {
+                        if intents.isEmpty {
+                            Text(context.attributes.userTask)
+                                .lineLimit(2)
+                                .multilineTextAlignment(.leading)
+                                .foregroundStyle(.blue)
+                                .padding(12)
+                                .background(
+                                    Color.blue.opacity(userTaskOpacity),
+                                    in: .rect(cornerRadius: 16, style: .continuous)
+                                )
+                                .overlay(alignment: .bottomTrailing, content: {
+                                    Image(.messageBubble)
+                                        .renderingMode(.template)
+                                        .offset(y: 10)
+                                        .foregroundStyle(.blue.opacity(userTaskOpacity))
+                                })
+                                .padding(.leading, 48)
+                                .padding(.trailing, 8)
+                                .font(.callout)
+                                .frame(maxWidth: .infinity, alignment: .trailing)
+                                .transition(.blurReplace)
+                        }
+                        
+                        
+                        ForEach(intents, id: \.self) { intent in
+                            let isBehind = intent != state.previousIntent
+                            
+                            IntentCard(text: intent, isBehind: isBehind)
+                        }
+                    }
+                    .compositingGroup()
+                    .transition(.blurReplace)
+                }
+            }
+            .frame(height: 70)
+            .padding(.bottom, 8)
+            .frame(maxHeight: .infinity)
+            .zIndex(10)
+            
+            // Footer: current intent + timer
+            HStack(spacing: 6) {
+                if state.isFinished {
+                    Text("^[\(state.stepNumber) step](inflect: true)")
+                        .transition(.blurReplace)
+                } else {
+                    HStack(spacing: 2) {
+                        Text(Image(systemName: state.currentIntentIcon ?? "arrow.turn.down.right"))
+                            .frame(width: 24, height: 18)
+                        
+                        Text(isWaiting ? "Thinking…" : state.currentIntent)
+                            .lineLimit(1)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .multilineTextAlignment(.leading)
+                    }
+                    .id(state.currentIntent)
+                    .transition(.blurReplace)
+                }
+                
+                Spacer()
+                
+                Group {
+                    if !isWaiting {
+                        if let endDate = state.intentEndDate {
+                            let interval = Duration.seconds(endDate.timeIntervalSince(state.intentStartDate))
+                            Text("Finished in \(interval.formatted(.time(pattern: .minuteSecond)))")
+                        } else {
+                            Text("00:00")
+                                .opacity(0)
+                                .overlay(alignment: .trailing) {
+                                    Text(state.intentStartDate, style: .timer)
+                                        .contentTransition(.numericText(countsDown: false))
+                                        .opacity(0.5)
+                                }
+                        }
+                    }
+                }
+                .font(.footnote.bold())
+                .monospacedDigit()
+                .multilineTextAlignment(.trailing)
+                .layoutPriority(1)
+            }
+            .foregroundStyle(primaryForeground)
+            .padding(.leading, 4)
+            .padding(.trailing, 12)
+            .font(.footnote.bold())
+            .opacity(isWaiting || state.isFinished ? 0.24 : 1)
         }
-        .padding(.top, 16)
-        .padding(.horizontal, 16)
-        .padding(.bottom, 16)
-        .activityBackgroundTint(.black)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 10)
+        .frame(height: 160)
+//        .background(isWaiting || state.isFinished ? Color.black.opacity(0) : Color.black.opacity(0.18))
+        .activityBackgroundTint(isWaiting || state.isFinished ? systemBackground : .clear)
+    }
+    
+    @ViewBuilder
+    private func agentAvatar() -> some View {
+        if false, let uiImage = SharedStorage.loadAvatarImage() {
+            Image(uiImage: uiImage)
+                .resizable()
+                .scaledToFill()
+        } else {
+            Image(.oddjob)
+                .resizable()
+                .scaledToFit()
+        }
     }
 }
 
-// MARK: - Shimmer Mask
-
-/// A gradient mask that gives a soft shimmer effect on the active intent text.
-struct ShimmerMask: View {
+struct IntentCard: View {
+    let text: String
+    let isBehind: Bool
+    
+    @State var showSymbol = false
+    
     var body: some View {
-        LinearGradient(
-            stops: [
-                .init(color: .white.opacity(0.4), location: 0),
-                .init(color: .white, location: 0.3),
-                .init(color: .white, location: 0.7),
-                .init(color: .white.opacity(0.4), location: 1.0)
-            ],
-            startPoint: .leading,
-            endPoint: .trailing
-        )
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        HStack(spacing: 10) {
+            Image(systemName: "checkmark.circle.fill")
+                .resizable()
+                .scaledToFit()
+                .symbolRenderingMode(.hierarchical)
+                .foregroundStyle(.green)
+                .frame(width: 15)
+            
+            Text(text)
+                .font(.callout)
+                .foregroundStyle(.black)
+                .frame(height: 60)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(height: 60)
+        .background(Color.white, in: .rect(cornerRadius: isBehind ? 10 : 16, style: .continuous))
+        .scaleEffect(isBehind ? 0.9 : 1)
+        .offset(y: isBehind ? 10 : 0)
+        .opacity(isBehind ? 0.72 : 1)
+        .zIndex(isBehind ? 0 : 1)
+        .transition(.asymmetric(
+            insertion: .offset(y: 120),
+            removal: .opacity.animation(.default.delay(0.3))
+        ))
+        .onAppear {
+            withAnimation(.default.delay(1)) {
+                showSymbol = true
+            }
+        }
     }
+}
+
+// MARK: - Previews
+
+#Preview("Lock Screen - In Progress", as: .content, using: ChowderActivityAttributes.preview) {
+    ChowderLiveActivity()
+} contentStates: {
+    ChowderActivityAttributes.ContentState.step1
+    ChowderActivityAttributes.ContentState.step2
+    ChowderActivityAttributes.ContentState.step3
+    ChowderActivityAttributes.ContentState.step4
+    ChowderActivityAttributes.ContentState.step5
+    ChowderActivityAttributes.ContentState.finished
+}
+
+#Preview("Lock Screen - Finished", as: .content, using: ChowderActivityAttributes.preview) {
+    ChowderLiveActivity()
+} contentStates: {
+    ChowderActivityAttributes.ContentState.finished
+}
+
+#Preview("Dynamic Island Compact", as: .dynamicIsland(.compact), using: ChowderActivityAttributes.preview) {
+    ChowderLiveActivity()
+} contentStates: {
+    ChowderActivityAttributes.ContentState.inProgress
+    ChowderActivityAttributes.ContentState.finished
+}
+
+#Preview("Dynamic Island Minimal", as: .dynamicIsland(.minimal), using: ChowderActivityAttributes.preview) {
+    ChowderLiveActivity()
+} contentStates: {
+    ChowderActivityAttributes.ContentState.inProgress
+    ChowderActivityAttributes.ContentState.finished
+}
+
+#Preview("Dynamic Island Expanded", as: .dynamicIsland(.expanded), using: ChowderActivityAttributes.preview) {
+    ChowderLiveActivity()
+} contentStates: {
+    ChowderActivityAttributes.ContentState.inProgress
+    ChowderActivityAttributes.ContentState.finished
 }
