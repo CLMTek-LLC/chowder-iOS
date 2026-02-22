@@ -4,7 +4,7 @@
 
 [hello@newmaterial.co](mailto:hello@newmaterial.co) · **Website:** [newmaterial.co](https://newmaterial.co) · **Follow:** [New Material on X](https://x.com/newmaterialco)
 
-🚧 *This repo is very early work in progress. We’d love feedback and contributions; please be kind.*
+🚧 *This repo is very early work in progress. We’d love feedback and contributions, please be kind.*
 
 ---
 
