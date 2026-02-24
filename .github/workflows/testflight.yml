@@ -39,7 +39,6 @@ jobs:
       PROJECT: Chowder/Chowder.xcodeproj
       ARCHIVE_PATH: ./build/Shelly.xcarchive
       EXPORT_PATH: ./build/export
-      AUTH_KEY_DIR: ~/.private_keys
 
     steps:
       # -----------------------------------------------------------------------
@@ -58,44 +57,55 @@ jobs:
 
       # -----------------------------------------------------------------------
       # 3. Decode App Store Connect API key
+      #    Use $HOME (not ~) — xcodebuild requires an absolute path
       # -----------------------------------------------------------------------
       - name: Install App Store Connect API key
         env:
           API_KEY_BASE64: ${{ secrets.APPLE_API_KEY_BASE64 }}
           API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
         run: |
-          mkdir -p "$AUTH_KEY_DIR"
-          echo "$API_KEY_BASE64" | base64 --decode > "$AUTH_KEY_DIR/AuthKey_${API_KEY_ID}.p8"
-          echo "API key written to $AUTH_KEY_DIR/AuthKey_${API_KEY_ID}.p8"
+          KEY_DIR="$HOME/.private_keys"
+          mkdir -p "$KEY_DIR"
+          echo "$API_KEY_BASE64" | base64 --decode > "$KEY_DIR/AuthKey_${API_KEY_ID}.p8"
+          # Verify the file is a valid PEM/DER private key
+          head -1 "$KEY_DIR/AuthKey_${API_KEY_ID}.p8"
+          echo "API key installed at $KEY_DIR/AuthKey_${API_KEY_ID}.p8"
 
       # -----------------------------------------------------------------------
       # 4. Build & archive
-      #    Build number is passed directly as CURRENT_PROJECT_VERSION so we
-      #    don't need to touch Info.plist (Xcode manages versions via xcodeproj)
+      #    - CURRENT_PROJECT_VERSION = GitHub run number (auto-increment)
+      #    - AUTH key path uses $HOME (absolute) so xcodebuild accepts it
       # -----------------------------------------------------------------------
       - name: Archive Shelly.xcarchive
+        env:
+          API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          ISSUER_ID: ${{ secrets.APPLE_ISSUER_ID }}
+          TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          BUILD_NUMBER: ${{ github.run_number }}
         run: |
+          KEY_PATH="$HOME/.private_keys/AuthKey_${API_KEY_ID}.p8"
           xcodebuild archive \
             -project "$PROJECT" \
             -scheme "$SCHEME" \
             -configuration Release \
             -archivePath "$ARCHIVE_PATH" \
             -allowProvisioningUpdates \
-            -authenticationKeyPath "$AUTH_KEY_DIR/AuthKey_${{ secrets.APPLE_API_KEY_ID }}.p8" \
-            -authenticationKeyID "${{ secrets.APPLE_API_KEY_ID }}" \
-            -authenticationKeyIssuerID "${{ secrets.APPLE_ISSUER_ID }}" \
+            -authenticationKeyPath "$KEY_PATH" \
+            -authenticationKeyID "$API_KEY_ID" \
+            -authenticationKeyIssuerID "$ISSUER_ID" \
             CODE_SIGN_STYLE=Automatic \
-            DEVELOPMENT_TEAM="${{ secrets.APPLE_TEAM_ID }}" \
+            DEVELOPMENT_TEAM="$TEAM_ID" \
             PRODUCT_BUNDLE_IDENTIFIER=com.clmtek.shellybot \
-            CURRENT_PROJECT_VERSION="${{ github.run_number }}" \
-            MARKETING_VERSION="1.0.${{ github.run_number }}"
+            CURRENT_PROJECT_VERSION="$BUILD_NUMBER" \
+            MARKETING_VERSION="1.0.$BUILD_NUMBER"
 
       # -----------------------------------------------------------------------
       # 5. Create ExportOptions.plist
       # -----------------------------------------------------------------------
       - name: Create ExportOptions.plist
+        env:
+          TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
-          TEAM_ID="${{ secrets.APPLE_TEAM_ID }}"
           cat > ExportOptions.plist << PLIST
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -117,23 +127,30 @@ jobs:
       # 6. Export IPA
       # -----------------------------------------------------------------------
       - name: Export IPA
+        env:
+          API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          ISSUER_ID: ${{ secrets.APPLE_ISSUER_ID }}
         run: |
+          KEY_PATH="$HOME/.private_keys/AuthKey_${API_KEY_ID}.p8"
           xcodebuild -exportArchive \
             -archivePath "$ARCHIVE_PATH" \
             -exportPath "$EXPORT_PATH" \
             -exportOptionsPlist ExportOptions.plist \
             -allowProvisioningUpdates \
-            -authenticationKeyPath "$AUTH_KEY_DIR/AuthKey_${{ secrets.APPLE_API_KEY_ID }}.p8" \
-            -authenticationKeyID "${{ secrets.APPLE_API_KEY_ID }}" \
-            -authenticationKeyIssuerID "${{ secrets.APPLE_ISSUER_ID }}"
+            -authenticationKeyPath "$KEY_PATH" \
+            -authenticationKeyID "$API_KEY_ID" \
+            -authenticationKeyIssuerID "$ISSUER_ID"
 
       # -----------------------------------------------------------------------
-      # 7. Upload to TestFlight via xcrun altool
+      # 7. Upload to TestFlight
       # -----------------------------------------------------------------------
       - name: Upload to TestFlight
+        env:
+          API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          ISSUER_ID: ${{ secrets.APPLE_ISSUER_ID }}
         run: |
           xcrun altool --upload-app \
             --type ios \
             --file "$EXPORT_PATH/Shelly.ipa" \
-            --apiKey "${{ secrets.APPLE_API_KEY_ID }}" \
-            --apiIssuer "${{ secrets.APPLE_ISSUER_ID }}"
+            --apiKey "$API_KEY_ID" \
+            --apiIssuer "$ISSUER_ID"
