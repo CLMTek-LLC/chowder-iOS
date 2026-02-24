@@ -2,9 +2,9 @@ import UIKit
 
 /// Provides access to shared storage for the agent avatar.
 /// NOTE: App Groups are not yet registered in Apple Dev portal.
-/// Using local app support directory until group.com.clmtek.shellybot is registered.
+/// Using local app support directory until group.com.clmtek.shelly is registered.
 enum SharedStorage {
-    static let appGroupIdentifier = "group.com.clmtek.shellybot"
+    static let appGroupIdentifier = "group.com.clmtek.shelly"
 
     private static var containerURL: URL? {
         FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first

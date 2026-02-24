@@ -77,7 +77,7 @@ jobs:
           API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
           ISSUER_ID: ${{ secrets.APPLE_ISSUER_ID }}
           TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-          BUILD_NUMBER: ${{ github.run_number }}
+          BUILD_NUMBER: ${{ github.run_number + 51 }}
         run: |
           KEY_PATH="$HOME/.private_keys/AuthKey_${API_KEY_ID}.p8"
           xcodebuild archive \
