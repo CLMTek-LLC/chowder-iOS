@@ -1,11 +1,13 @@
 import UIKit
 
-/// Provides access to the App Group shared container for data shared between the main app and widget extension.
+/// Provides access to shared storage for the agent avatar.
+/// NOTE: App Groups are not yet registered in Apple Dev portal.
+/// Using local app support directory until group.com.clmtek.shellybot is registered.
 enum SharedStorage {
-    static let appGroupIdentifier = "group.app.chowder"
+    static let appGroupIdentifier = "group.com.clmtek.shellybot"
 
     private static var containerURL: URL? {
-        FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: appGroupIdentifier)
+        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
     }
 
     private static var avatarURL: URL? {
