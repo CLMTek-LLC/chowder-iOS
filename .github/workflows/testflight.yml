@@ -4,7 +4,8 @@
 #
 # Builds the Shelly iOS app and uploads to TestFlight on every push to main.
 # Uses App Store Connect API key for automatic signing — no provisioning
-# profiles to manage. Xcode auto-registers bundle IDs and app groups.
+# profiles to manage. Xcode auto-registers bundle IDs when API key has
+# App Manager role in App Store Connect.
 #
 # Required GitHub repository secrets:
 #   APPLE_API_KEY_BASE64  — base64 -i AuthKey_L28MWL7HC9.p8
@@ -36,6 +37,7 @@ jobs:
       PROJECT: Chowder/Chowder.xcodeproj
       ARCHIVE_PATH: ./build/Shelly.xcarchive
       EXPORT_PATH: ./build/export
+      BUILD_NUMBER_OFFSET: 51
 
     steps:
       # -----------------------------------------------------------------------
@@ -45,9 +47,9 @@ jobs:
         uses: actions/checkout@v4
 
       # -----------------------------------------------------------------------
-      # 2. Select Xcode 16
+      # 2. Select Xcode 26 (required for FoundationModels)
       # -----------------------------------------------------------------------
-      - name: Set up Xcode 16
+      - name: Set up Xcode 26
         uses: maxim-lobanov/setup-xcode@v1
         with:
           xcode-version: '26'
@@ -64,20 +66,28 @@ jobs:
           KEY_DIR="$HOME/.private_keys"
           mkdir -p "$KEY_DIR"
           echo "$API_KEY_BASE64" | base64 --decode > "$KEY_DIR/AuthKey_${API_KEY_ID}.p8"
-          echo "API key installed at $KEY_DIR/AuthKey_${API_KEY_ID}.p8"
+          echo "API key installed"
 
       # -----------------------------------------------------------------------
-      # 4. Build & archive for iOS
+      # 4. Calculate build number (starts at 60)
+      #    Uses shell arithmetic: run_number + offset
+      # -----------------------------------------------------------------------
+      - name: Calculate build number
+        run: |
+          BUILD_NUM=$(( ${{ github.run_number }} + $BUILD_NUMBER_OFFSET ))
+          echo "BUILD_NUMBER=$BUILD_NUM" >> "$GITHUB_ENV"
+          echo "Build number: $BUILD_NUM (run ${{ github.run_number }} + offset $BUILD_NUMBER_OFFSET)"
+
+      # -----------------------------------------------------------------------
+      # 5. Build & archive for iOS
       #    - destination=generic/platform=iOS ensures iOS (not macOS) target
-      #    - allowProvisioningUpdates auto-registers bundle ID + app group
-      #    - CURRENT_PROJECT_VERSION uses GitHub run number as build number
+      #    - allowProvisioningUpdates auto-registers bundle ID + profiles
       # -----------------------------------------------------------------------
       - name: Archive Shelly.xcarchive
         env:
           API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
           ISSUER_ID: ${{ secrets.APPLE_ISSUER_ID }}
           TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-          BUILD_NUMBER: ${{ github.run_number + 51 }}
         run: |
           KEY_PATH="$HOME/.private_keys/AuthKey_${API_KEY_ID}.p8"
           xcodebuild archive \
@@ -96,7 +106,7 @@ jobs:
             MARKETING_VERSION="1.0.$BUILD_NUMBER"
 
       # -----------------------------------------------------------------------
-      # 5. Create ExportOptions.plist
+      # 6. Create ExportOptions.plist
       # -----------------------------------------------------------------------
       - name: Create ExportOptions.plist
         env:
@@ -120,7 +130,7 @@ jobs:
           PLIST
 
       # -----------------------------------------------------------------------
-      # 6. Export IPA
+      # 7. Export IPA
       # -----------------------------------------------------------------------
       - name: Export IPA
         env:
@@ -138,7 +148,7 @@ jobs:
             -authenticationKeyIssuerID "$ISSUER_ID"
 
       # -----------------------------------------------------------------------
-      # 7. Upload to TestFlight
+      # 8. Upload to TestFlight
       # -----------------------------------------------------------------------
       - name: Upload to TestFlight
         env:
