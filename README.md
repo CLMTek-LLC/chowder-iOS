@@ -1,3 +1,11 @@
+# Shelly for iOS
+
+Native iOS client for [Shellybot](https://github.com/shellybotmoyer) — forked from [chowder-iOS](https://github.com/newmaterialco/chowder-iOS) by newmaterial.co.
+
+Built for CLMTek, LLC — connects to your personal AI via OpenClaw gateway over Tailscale.
+
+---
+
 # Chowder for iOS
 
 > We are working on a suit of **AI-first patterns** that we believe should be common in mobile chat interfaces. We're starting with Live Activity and thinking steps; we're also planning new ways to input speech, add context and media from the keyboard, use location, and more so chat UIs feel native and transparent instead of opaque.

@@ -7,7 +7,7 @@ struct ConnectionConfig {
     private static let tokenKeychainKey = "gatewayToken"
 
     var gatewayURL: String {
-        get { UserDefaults.standard.string(forKey: Self.gatewayURLKey) ?? "" }
+        get { UserDefaults.standard.string(forKey: Self.gatewayURLKey) ?? "ws://100.64.217.114:18789" }
         set { UserDefaults.standard.set(newValue, forKey: Self.gatewayURLKey) }
     }
 
