@@ -1,0 +1,146 @@
+# =============================================================================
+# Shelly iOS — TestFlight CI/CD Pipeline
+# =============================================================================
+#
+# Builds the Shelly iOS app and uploads to TestFlight on every push to main.
+# Uses App Store Connect API key for automatic signing (no provisioning profile
+# management needed).
+#
+# Required GitHub repository secrets:
+#   Settings → Secrets and variables → Actions → New repository secret
+#
+#   APPLE_API_KEY_BASE64  — base64-encoded .p8 key file content
+#                           Generate with: base64 -i AuthKey_L28MWL7HC9.p8
+#   APPLE_API_KEY_ID      — L28MWL7HC9
+#   APPLE_ISSUER_ID       — 69a6de6e-6108-47e3-e053-5b8c7c11a4d1
+#   APPLE_TEAM_ID         — T2H2YPQXA9
+#
+# Optional (manual signing fallback):
+#   MATCH_CERTIFICATE_BASE64  — base64-encoded Distribution certificate .p12
+#   MATCH_CERTIFICATE_PASSWORD — password for the .p12
+# =============================================================================
+
+name: Build & Deploy to TestFlight
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: testflight-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-upload:
+    name: Build & Upload to TestFlight
+    runs-on: macos-latest
+    timeout-minutes: 30
+
+    env:
+      SCHEME: Chowder
+      PROJECT: Chowder/Chowder.xcodeproj
+      ARCHIVE_PATH: ./build/Shelly.xcarchive
+      EXPORT_PATH: ./build/export
+      AUTH_KEY_DIR: ~/.private_keys
+
+    steps:
+      # -----------------------------------------------------------------------
+      # 1. Checkout
+      # -----------------------------------------------------------------------
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # -----------------------------------------------------------------------
+      # 2. Select Xcode 16
+      # -----------------------------------------------------------------------
+      - name: Set up Xcode 16
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: '16'
+
+      # -----------------------------------------------------------------------
+      # 3. Decode App Store Connect API key
+      # -----------------------------------------------------------------------
+      - name: Install App Store Connect API key
+        env:
+          API_KEY_BASE64: ${{ secrets.APPLE_API_KEY_BASE64 }}
+          API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+        run: |
+          mkdir -p "$AUTH_KEY_DIR"
+          echo "$API_KEY_BASE64" | base64 --decode > "$AUTH_KEY_DIR/AuthKey_${API_KEY_ID}.p8"
+          echo "API key written to $AUTH_KEY_DIR/AuthKey_${API_KEY_ID}.p8"
+
+      # -----------------------------------------------------------------------
+      # 4. Auto-increment build number using GitHub run number
+      # -----------------------------------------------------------------------
+      - name: Set build number to ${{ github.run_number }}
+        run: |
+          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion ${{ github.run_number }}" \
+            "Chowder/Chowder/Info.plist"
+          echo "Build number set to ${{ github.run_number }}"
+
+      # -----------------------------------------------------------------------
+      # 5. Build & archive
+      # -----------------------------------------------------------------------
+      - name: Archive Shelly.xcarchive
+        run: |
+          xcodebuild archive \
+            -project "$PROJECT" \
+            -scheme "$SCHEME" \
+            -configuration Release \
+            -archivePath "$ARCHIVE_PATH" \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath "$AUTH_KEY_DIR/AuthKey_${{ secrets.APPLE_API_KEY_ID }}.p8" \
+            -authenticationKeyID "${{ secrets.APPLE_API_KEY_ID }}" \
+            -authenticationKeyIssuerID "${{ secrets.APPLE_ISSUER_ID }}" \
+            CODE_SIGN_STYLE=Automatic \
+            DEVELOPMENT_TEAM="${{ secrets.APPLE_TEAM_ID }}" \
+            PRODUCT_BUNDLE_IDENTIFIER=com.clmtek.shellybot
+
+      # -----------------------------------------------------------------------
+      # 6. Create ExportOptions.plist
+      # -----------------------------------------------------------------------
+      - name: Create ExportOptions.plist
+        run: |
+          cat > ExportOptions.plist << 'PLIST'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>method</key>
+            <string>app-store-connect</string>
+            <key>teamID</key>
+            <string>${{ secrets.APPLE_TEAM_ID }}</string>
+            <key>uploadSymbols</key>
+            <true/>
+            <key>compileBitcode</key>
+            <false/>
+          </dict>
+          </plist>
+          PLIST
+
+      # -----------------------------------------------------------------------
+      # 7. Export IPA
+      # -----------------------------------------------------------------------
+      - name: Export IPA
+        run: |
+          xcodebuild -exportArchive \
+            -archivePath "$ARCHIVE_PATH" \
+            -exportPath "$EXPORT_PATH" \
+            -exportOptionsPlist ExportOptions.plist \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath "$AUTH_KEY_DIR/AuthKey_${{ secrets.APPLE_API_KEY_ID }}.p8" \
+            -authenticationKeyID "${{ secrets.APPLE_API_KEY_ID }}" \
+            -authenticationKeyIssuerID "${{ secrets.APPLE_ISSUER_ID }}"
+
+      # -----------------------------------------------------------------------
+      # 8. Upload to TestFlight
+      # -----------------------------------------------------------------------
+      - name: Upload to TestFlight
+        run: |
+          xcrun altool --upload-app \
+            --type ios \
+            --file "$EXPORT_PATH/Shelly.ipa" \
+            --apiKey "${{ secrets.APPLE_API_KEY_ID }}" \
+            --apiIssuer "${{ secrets.APPLE_ISSUER_ID }}"
